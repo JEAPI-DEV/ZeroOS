@@ -1,0 +1,67 @@
+const std = @import("std");
+
+pub fn build(b: *std.Build) void {
+    // Target the `x86_64-freestanding-none` ABI.
+    var target_query: std.Target.Query = .{
+        .cpu_arch = .x86_64,
+        .os_tag = .freestanding,
+        .abi = .none,
+    };
+    // Disable all hardware floating point features.
+    const Feature = std.Target.x86.Feature;
+    target_query.cpu_features_sub.addFeature(@intFromEnum(Feature.x87));
+    target_query.cpu_features_sub.addFeature(@intFromEnum(Feature.mmx));
+    target_query.cpu_features_sub.addFeature(@intFromEnum(Feature.sse));
+    target_query.cpu_features_sub.addFeature(@intFromEnum(Feature.sse2));
+    target_query.cpu_features_sub.addFeature(@intFromEnum(Feature.avx));
+    target_query.cpu_features_sub.addFeature(@intFromEnum(Feature.avx2));
+    // Enable software floating point instead.
+    target_query.cpu_features_add.addFeature(@intFromEnum(Feature.soft_float));
+
+    const target = b.resolveTargetQuery(target_query);
+    const optimize = b.standardOptimizeOption(.{});
+
+    // Create the kernel module.
+    const kernel_module = b.createModule(.{
+        .root_source_file = b.path("src/main.zig"),
+        .target = target,
+        .optimize = optimize,
+        .code_model = .kernel, // Higher half kernel.
+        .pic = false, // Disable position independent code.
+        .omit_frame_pointer = false, // Needed for stack traces.
+        // Disable features that are problematic in kernel space.
+        .red_zone = false,
+        .stack_check = false,
+        .stack_protector = false,
+        // Ensure the C and C++ standard libraries are not linked.
+        .link_libc = false,
+        .link_libcpp = false,
+    });
+    // Add some assembly code to the build (Interrupt Service Routines).
+    kernel_module.addAssemblyFile(b.path("src/interrupt/isr_stubs.s"));
+
+    // Add the Limine library as a dependency.
+    const limine = b.dependency("limine", .{});
+    kernel_module.addImport("limine", limine.module("limine"));
+
+    // Create the kernel executable from the module.
+    const kernel = b.addExecutable(.{
+        .name = "kernel",
+        .root_module = kernel_module,
+        .linkage = .static, // Disable dynamic linking.
+    });
+    // Disable LTO as it can lead to issues for kernels.
+    kernel.want_lto = false;
+
+    // Delete unused sections to reduce the kernel size.
+    kernel.link_function_sections = true;
+    kernel.link_data_sections = true;
+    kernel.link_gc_sections = true;
+    // Force the page size to 4 KiB to prevent binary bloat.
+    kernel.link_z_max_page_size = 0x1000;
+
+    // Link with a custom linker script.
+    kernel.setLinkerScript(b.path("linker.ld"));
+
+    b.installArtifact(kernel);
+}
