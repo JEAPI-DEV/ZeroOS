@@ -217,8 +217,8 @@ fn alloc(context: *anyopaque, size: usize, alignment: std.mem.Alignment, ret_add
     _ = alignment;
     _ = ret_addr;
 
-    // TODO(1): Implement proper aligned allocations.
-    const adjusted_size = @max(size, 8);
+    // Ensure 8-byte alignment for all allocations.
+    const adjusted_size = std.mem.alignForward(usize, size, 8);
 
     // Find a free block that can hold the requested size.
     var block = searchFreeBlock(adjusted_size) orelse {

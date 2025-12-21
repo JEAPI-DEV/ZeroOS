@@ -20,6 +20,8 @@ const proc = @import("./proc/process.zig");
 const scheduler = @import("./proc/scheduler.zig");
 const pit = @import("./driver/pit.zig");
 const isr = @import("./interrupt/isr.zig");
+const vfs = @import("./fs/vfs.zig");
+const ramfs = @import("./fs/ramfs.zig");
 
 const MEGABYTE = phys.MEGABYTE;
 
@@ -61,7 +63,11 @@ export fn _start() callconv(.c) noreturn {
     idt.initialize();
     phys.initialize();
     virt.initialize();
-    heap.initialize(4 * MEGABYTE);
+    heap.initialize(32 * MEGABYTE);
+
+    // Initialize VFS and mount RAMFS.
+    const root_fs = ramfs.createFileSystem(heap.allocator, "root") catch unreachable;
+    vfs.mount(root_fs);
 
     // Initialize drivers.
     const pic = @import("./driver/pic.zig");
@@ -98,7 +104,7 @@ export fn _start() callconv(.c) noreturn {
     // Register the current execution as the first thread.
     const main_thread = heap.allocator.create(proc.Thread) catch unreachable;
     main_thread.* = .{
-        .id = 1,
+        .id = 999,
         .state = .RUNNING,
         .stack_pointer = 0,
         .process = &kernel_proc,

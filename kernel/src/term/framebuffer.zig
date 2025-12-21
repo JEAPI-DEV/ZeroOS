@@ -7,10 +7,10 @@ const limine = @import("limine");
 
 const assert = @import("std").debug.assert;
 
-/// Colors have 24-bit depth: 0xRRGGBB.
-pub const RgbColor = u24;
+/// Colors have 32-bit depth: 0xXXRRGGBB.
+pub const RgbColor = u32;
 comptime {
-    assert(@alignOf(RgbColor) == 4);
+    assert(@sizeOf(RgbColor) == 4);
 }
 
 /// Bits per pixel.

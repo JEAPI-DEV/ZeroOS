@@ -47,6 +47,9 @@ var current_fg: RgbColor = @intFromEnum(Color.white);
 /// Current background color.
 var current_bg: RgbColor = @intFromEnum(Color.black);
 
+/// If true, terminal output is suppressed (e.g. when GUI is active).
+pub var suppressed: bool = false;
+
 /// Initializes the terminal.
 /// This function must be called before any other function in this module.
 pub fn initialize() void {
@@ -138,6 +141,8 @@ fn writeString(bytes: []const u8) void {
 /// Parameters:
 ///   c: ASCII code of the character.
 fn writeChar(c: u8) void {
+    if (suppressed) return;
+
     // If we've run out of space, scroll the screen.
     if (cursor == (screen_width * screen_height) - 1) {
         framebuffer.scrollUp(current_bg); // Scroll the screen up one line.

@@ -40,6 +40,9 @@ var buffer: [BUFFER_SIZE]u8 = undefined;
 var write_index: usize = 0;
 var read_index: usize = 0;
 var count: usize = 0;
+var mouse_dx: i32 = 0;
+var mouse_dy: i32 = 0;
+var mouse_buttons: u8 = 0;
 
 /// Global state to track if we have a second channel (mouse).
 var has_dual_channel: bool = false;
@@ -259,6 +262,16 @@ pub fn getKey() u8 {
     return char;
 }
 
+pub fn getMouseDelta(dx: *i32, dy: *i32, buttons: *u8) void {
+    asm volatile ("cli");
+    dx.* = mouse_dx;
+    dy.* = mouse_dy;
+    buttons.* = mouse_buttons;
+    mouse_dx = 0;
+    mouse_dy = 0;
+    asm volatile ("sti");
+}
+
 /// Handles a byte from the keyboard.
 fn handleKeyboardByte(byte: u8) void {
     serial.print("[PS2] handleKeyboardByte: {x}\n", .{byte});
@@ -305,8 +318,9 @@ fn handleMouseByte(byte: u8) void {
         const x_mov = @as(i16, @intCast(x_raw)) - @as(i16, @intCast((flags << 4) & 0x100));
         const y_mov = @as(i16, @intCast(y_raw)) - @as(i16, @intCast((flags << 3) & 0x100));
 
-        _ = x_mov;
-        _ = y_mov;
+        mouse_dx += x_mov;
+        mouse_dy += y_mov;
+        mouse_buttons = @intCast(flags & 0x07);
 
         // Let's print only on click to avoid spamming.
         if ((flags & 1) != 0) {

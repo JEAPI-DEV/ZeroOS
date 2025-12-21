@@ -50,7 +50,7 @@ $(ISO_FILE): boot/limine kernel
 # Run the ISO image in QEMU.
 .PHONY: run
 run: $(ISO_FILE)
-	qemu-system-x86_64 -M q35 -m 128M -cdrom $(ISO_FILE) -boot d
+	qemu-system-x86_64 -M q35 -m 128M -cdrom $(ISO_FILE) -boot d -serial stdio
 
 # Clean up build artifacts.
 .PHONY: clean
