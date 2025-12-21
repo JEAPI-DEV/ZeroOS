@@ -144,6 +144,10 @@ pub fn initMouse() void {
     // Reset Mouse
     resetDevice(true);
 
+    // Set Defaults
+    sendDataToDevice(true, 0xF6);
+    _ = readData(); // Acknowledge
+
     // Reset cycle state
     mouse_cycle = 0;
 
@@ -196,10 +200,8 @@ fn readData() u8 {
 
 /// Flushes the output buffer.
 fn flushBuffer() void {
-    var temp = x64.inb(STATUS_PORT);
-    while ((temp & 1) != 0) {
+    while ((x64.inb(STATUS_PORT) & 1) != 0) {
         _ = x64.inb(DATA_PORT);
-        temp = x64.inb(STATUS_PORT);
     }
 }
 
@@ -217,13 +219,17 @@ fn resetDevice(is_mouse: bool) void {
     sendDataToDevice(is_mouse, 0xFF);
     const ack = readData();
     if (ack != 0xFA) {
-        term.print("Device Reset failed (No ACK)!\n", .{});
+        term.print("Device Reset failed (No ACK: {x})!\n", .{ack});
         return;
     }
     const res = readData();
     if (res != 0xAA) {
-        term.print("Device Reset failed (Self-test failed)!\n", .{});
+        term.print("Device Reset failed (Self-test failed: {x})!\n", .{res});
+        return;
     }
+    // Read the ID byte (0x00 for standard mouse/keyboard)
+    const id = readData();
+    _ = id;
 }
 
 /// Returns the next character from the keyboard buffer.
@@ -290,8 +296,8 @@ fn handleMouseByte(byte: u8) void {
         const y_raw = @as(u16, mouse_byte[2]);
 
         // 9-bit signed extension logic
-        const x_mov = @as(i16, @bitCast(x_raw - ((flags << 4) & 0x100)));
-        const y_mov = @as(i16, @bitCast(y_raw - ((flags << 3) & 0x100)));
+        const x_mov = @as(i16, @intCast(x_raw)) - @as(i16, @intCast((flags << 4) & 0x100));
+        const y_mov = @as(i16, @intCast(y_raw)) - @as(i16, @intCast((flags << 3) & 0x100));
 
         _ = x_mov;
         _ = y_mov;
@@ -306,44 +312,31 @@ fn handleMouseByte(byte: u8) void {
     }
 }
 
+/// Common logic to drain the PS/2 controller buffer.
+fn drainBuffer() void {
+    while (true) {
+        const status = x64.inb(STATUS_PORT);
+        if ((status & 0x01) == 0) break; // Output buffer empty
+
+        const data = x64.inb(DATA_PORT);
+        if ((status & 0x20) != 0) {
+            handleMouseByte(data);
+        } else {
+            handleKeyboardByte(data);
+        }
+    }
+}
+
 /// Keyboard interrupt handler.
 fn keyboardHandler(ctx: *isr.InterruptStack) callconv(.c) void {
     _ = ctx;
-
-    // Send End of Interrupt (EOI) to the PIC.
-    defer pic.sendEOI(KEYBOARD_IRQ);
-
-    // ALWAYS read the data port to drain the 8042 buffer
-    const data = x64.inb(DATA_PORT);
-
-    // Now check status
-    const status = x64.inb(STATUS_PORT);
-
-    // Dispatch based on whether it was mouse data (bit 5)
-    if ((status & 0x20) != 0) {
-        handleMouseByte(data);
-    } else {
-        handleKeyboardByte(data);
-    }
+    drainBuffer();
+    pic.sendEOI(KEYBOARD_IRQ);
 }
 
 /// Mouse interrupt handler.
 fn mouseHandler(ctx: *isr.InterruptStack) callconv(.c) void {
     _ = ctx;
-
-    // Send EOI.
-    defer pic.sendEOI(MOUSE_IRQ);
-
-    // ALWAYS read the data port to drain the 8042 buffer
-    const data = x64.inb(DATA_PORT);
-
-    // Now check status
-    const status = x64.inb(STATUS_PORT);
-
-    // Dispatch based on whether it was mouse data (bit 5)
-    if ((status & 0x20) != 0) {
-        handleMouseByte(data);
-    } else {
-        handleKeyboardByte(data);
-    }
+    drainBuffer();
+    pic.sendEOI(MOUSE_IRQ);
 }
