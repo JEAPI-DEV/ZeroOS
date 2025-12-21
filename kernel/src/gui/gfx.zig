@@ -44,6 +44,7 @@ pub const Canvas = struct {
     }
 
     pub fn drawChar(self: *Canvas, c: u8, x: usize, y: usize, fg: Color) void {
+        if (c >= font.NUM_GLYPHS) return;
         const glyph = font.BITMAP[c];
         for (0..font.HEIGHT) |dy| {
             for (0..font.WIDTH) |dx| {
@@ -74,7 +75,7 @@ pub fn initialize(allocator: std.mem.Allocator) !void {
 
     const size = fb.width * fb.height;
     serial.print("[GFX] Allocating back buffer ({} bytes)...\n", .{size * @sizeOf(Color)});
-    back_buffer = try allocator.alloc(Color, size);
+    back_buffer = try allocator.alignedAlloc(Color, .@"8", size);
     serial.print("[GFX] Allocation successful\n", .{});
 
     screen_canvas = .{
@@ -85,12 +86,12 @@ pub fn initialize(allocator: std.mem.Allocator) !void {
 }
 
 pub fn swap() void {
-    const front_ptr: [*]volatile Color = @ptrCast(@alignCast(fb.framebuffer_request.response.?.framebuffers()[0].address));
+    const front_ptr: [*]volatile u64 = @ptrCast(@alignCast(fb.framebuffer_request.response.?.framebuffers()[0].address));
+    const back_ptr: [*]const u64 = @ptrCast(@alignCast(back_buffer.ptr));
 
-    // Manual copy to ensure volatile writes
+    const size = (fb.width * fb.height * @sizeOf(Color)) / 8;
     var i: usize = 0;
-    const size = fb.width * fb.height;
     while (i < size) : (i += 1) {
-        front_ptr[i] = back_buffer[i];
+        front_ptr[i] = back_ptr[i];
     }
 }

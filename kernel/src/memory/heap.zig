@@ -236,24 +236,22 @@ fn alloc(context: *anyopaque, size: usize, alignment: std.mem.Alignment, ret_add
 
 /// Implement standard resize function - see std.mem.Allocator.
 fn resize(context: *anyopaque, memory: []u8, alignment: std.mem.Alignment, new_len: usize, ret_addr: usize) bool {
-    // TODO(3): Implement realloc.
     _ = context;
     _ = memory;
     _ = alignment;
     _ = new_len;
     _ = ret_addr;
-    @panic("allocator.resize() is not implemented");
+    return false;
 }
 
 /// Implement standard remap function - see std.mem.Allocator.
 fn remap(context: *anyopaque, memory: []u8, alignment: std.mem.Alignment, new_len: usize, ret_addr: usize) ?[*]u8 {
-    // TODO(3): Implement remap.
     _ = context;
     _ = memory;
     _ = alignment;
     _ = new_len;
     _ = ret_addr;
-    @panic("allocator.remap() is not implemented");
+    return null;
 }
 
 /// Implement standard free function - see std.mem.Allocator.

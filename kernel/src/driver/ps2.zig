@@ -6,6 +6,7 @@ const pic = @import("pic.zig");
 const term = @import("../term/terminal.zig");
 const x64 = @import("../cpu/x64.zig");
 const serial = @import("serial.zig");
+const input = @import("input.zig");
 
 /// The PS/2 driver instance.
 pub const ps2_driver = driver.Driver{
@@ -32,18 +33,7 @@ const scancode_set1 = [_]u8{
     'x',  'c', 'v', 'b', 'n', 'm', ',', '.', '/', 0,   '*',  0,   ' ',
 };
 
-/// Keyboard buffer size.
-const BUFFER_SIZE = 128;
-
-/// Circular buffer for keyboard input.
-var buffer: [BUFFER_SIZE]u8 = undefined;
-var write_index: usize = 0;
-var read_index: usize = 0;
-var count: usize = 0;
-var mouse_dx: i32 = 0;
-var mouse_dy: i32 = 0;
-var mouse_buttons: u8 = 0;
-
+/// Global state to track if we have a second channel (mouse).
 /// Global state to track if we have a second channel (mouse).
 var has_dual_channel: bool = false;
 
@@ -236,45 +226,9 @@ fn resetDevice(is_mouse: bool) void {
     _ = id;
 }
 
-/// Returns the next character from the keyboard buffer.
-/// This function blocks until a character is available.
-pub fn getKey() u8 {
-    const scheduler = @import("../proc/scheduler.zig");
-    // Wait for data.
-    while (true) {
-        const c = @as(*volatile usize, &count).*;
-        if (c > 0) break;
-        scheduler.global_scheduler.yield();
-    }
-
-    // Disable interrupts to ensure atomicity.
-    asm volatile ("cli");
-
-    const char = buffer[read_index];
-    read_index = (read_index + 1) % BUFFER_SIZE;
-    count -= 1;
-
-    serial.print("[PS2] getKey returning: {c} (count now {})\n", .{ char, count });
-
-    // Re-enable interrupts.
-    asm volatile ("sti");
-
-    return char;
-}
-
-pub fn getMouseDelta(dx: *i32, dy: *i32, buttons: *u8) void {
-    asm volatile ("cli");
-    dx.* = mouse_dx;
-    dy.* = mouse_dy;
-    buttons.* = mouse_buttons;
-    mouse_dx = 0;
-    mouse_dy = 0;
-    asm volatile ("sti");
-}
-
 /// Handles a byte from the keyboard.
 fn handleKeyboardByte(byte: u8) void {
-    serial.print("[PS2] handleKeyboardByte: {x}\n", .{byte});
+    // serial.print("[PS2] handleKeyboardByte: {x}\n", .{byte});
     // If the top bit is set, it's a key release.
     if ((byte & 0x80) != 0) {
         return;
@@ -284,12 +238,7 @@ fn handleKeyboardByte(byte: u8) void {
     if (byte < scancode_set1.len) {
         const char = scancode_set1[byte];
         if (char != 0) {
-            // Push to buffer if not full.
-            if (count < BUFFER_SIZE) {
-                buffer[write_index] = char;
-                write_index = (write_index + 1) % BUFFER_SIZE;
-                count += 1;
-            }
+            input.pushKey(char);
         }
     }
 }
@@ -318,9 +267,7 @@ fn handleMouseByte(byte: u8) void {
         const x_mov = @as(i16, @intCast(x_raw)) - @as(i16, @intCast((flags << 4) & 0x100));
         const y_mov = @as(i16, @intCast(y_raw)) - @as(i16, @intCast((flags << 3) & 0x100));
 
-        mouse_dx += x_mov;
-        mouse_dy += y_mov;
-        mouse_buttons = @intCast(flags & 0x07);
+        input.updateMouse(@intCast(x_mov), @intCast(y_mov), @intCast(flags & 0x07));
 
         // Let's print only on click to avoid spamming.
         if ((flags & 1) != 0) {
@@ -350,7 +297,7 @@ fn drainBuffer() void {
 /// Keyboard interrupt handler.
 fn keyboardHandler(ctx: *isr.InterruptStack) callconv(.c) void {
     _ = ctx;
-    serial.print("[PS2] Keyboard IRQ\n", .{});
+    // serial.print("[PS2] Keyboard IRQ\n", .{});
     drainBuffer();
     pic.sendEOI(KEYBOARD_IRQ);
 }
@@ -358,7 +305,7 @@ fn keyboardHandler(ctx: *isr.InterruptStack) callconv(.c) void {
 /// Mouse interrupt handler.
 fn mouseHandler(ctx: *isr.InterruptStack) callconv(.c) void {
     _ = ctx;
-    serial.print("[PS2] Mouse IRQ\n", .{});
+    // serial.print("[PS2] Mouse IRQ\n", .{});
     drainBuffer();
     pic.sendEOI(MOUSE_IRQ);
 }

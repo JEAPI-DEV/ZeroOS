@@ -113,7 +113,7 @@ pub const Scheduler = struct {
                     self.ready_queue.append(old_node);
                 }
 
-                serial.print("[SCHED] {} -> {}\n", .{ old.id, next_thread.id });
+                //serial.print("[SCHED] {} -> {}\n", .{ old.id, next_thread.id });
                 self.lock.unlock();
                 switchContext(&old.context, &next_thread.context);
             } else {

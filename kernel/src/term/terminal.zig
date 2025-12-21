@@ -64,6 +64,7 @@ pub fn initialize() void {
 
 /// Clears the screen.
 pub fn clear() void {
+    if (suppressed) return;
     framebuffer.clear(current_bg);
     cursor = 0;
 }
