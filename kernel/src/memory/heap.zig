@@ -1,5 +1,6 @@
 const std = @import("std");
 const term = @import("../term/terminal.zig");
+const serial = @import("../driver/serial.zig");
 
 const assert = @import("std").debug.assert;
 const GIGABYTE = @import("./phys.zig").GIGABYTE;
@@ -199,11 +200,14 @@ const Block = struct {
 ///   A pointer to a suitable block, or null if none was found.
 fn searchFreeBlock(size: usize) ?*Block {
     var curr = free_list;
+    var count: usize = 0;
     while (curr) |block| : (curr = block.next_free) {
+        count += 1;
         if (block.size() >= size) {
             return block;
         }
     }
+    serial.print("[HEAP] searchFreeBlock({}) failed. free_list_len={}\n", .{ size, count });
     return null;
 }
 
@@ -217,7 +221,10 @@ fn alloc(context: *anyopaque, size: usize, alignment: std.mem.Alignment, ret_add
     const adjusted_size = @max(size, 8);
 
     // Find a free block that can hold the requested size.
-    var block = searchFreeBlock(adjusted_size) orelse return null;
+    var block = searchFreeBlock(adjusted_size) orelse {
+        serial.print("[HEAP] Allocation failed for size {}\n", .{size});
+        return null;
+    };
     // If it's larger than needed, split it.
     if (block.size() > adjusted_size + @sizeOf(Block)) {
         block.split(adjusted_size);

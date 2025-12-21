@@ -15,6 +15,9 @@ const x64 = @import("./cpu/x64.zig");
 const driver = @import("./driver/driver.zig");
 const ps2 = @import("./driver/ps2.zig");
 const shell = @import("./term/shell.zig");
+const serial = @import("./driver/serial.zig");
+const proc = @import("./proc/process.zig");
+const scheduler = @import("./proc/scheduler.zig");
 
 const MEGABYTE = phys.MEGABYTE;
 
@@ -28,9 +31,11 @@ pub export var base_revision: limine.BaseRevision linksection(".limine_requests"
 
 /// Kernel's global panic handler.
 pub fn panic(msg: []const u8, _: ?*std.builtin.StackTrace, _: ?usize) noreturn {
-    // TODO(2): Support stack traces.
+    serial.print("\n!!! KERNEL PANIC !!!\n{s}\n", .{msg});
     term.panic("{s}", .{msg});
 }
+
+var kernel_proc: proc.Process = undefined;
 
 /// Kernel's entry point.
 export fn _start() callconv(.c) noreturn {
@@ -41,6 +46,11 @@ export fn _start() callconv(.c) noreturn {
 
     // Initialize the terminal.
     term.initialize();
+
+    // Initialize serial.
+    serial.init();
+    serial.print("Zero OS Serial Debug Console\n", .{});
+
     term.print("Welcome to ", .{});
     term.colorPrint(.blue, "Zero v{s}.\n\n", .{Zero_VERSION});
 
@@ -53,33 +63,62 @@ export fn _start() callconv(.c) noreturn {
 
     // Initialize drivers.
     const pic = @import("./driver/pic.zig");
-    // Remap PIC to 0x20-0x27 and 0x28-0x2F.
-    term.print("Remapping PIC...\n", .{});
     pic.remap(0x20, 0x28);
-    // Unmask Keyboard IRQ (IRQ 1).
-    term.print("Unmasking IRQ 1...\n", .{});
     pic.unmask(1);
-    // Unmask Mouse IRQ (IRQ 12).
-    term.print("Unmasking IRQ 12...\n", .{});
     pic.unmask(12);
-    // Unmask Cascade IRQ (IRQ 2) so Slave PIC works.
-    term.print("Unmasking IRQ 2 (Cascade)...\n", .{});
     pic.unmask(2);
 
     driver.DriverManager.register(ps2.ps2_driver);
     driver.DriverManager.initialize();
-
-    // Initialize Mouse.
     ps2.initMouse();
 
+    // Initialize scheduler.
+    scheduler.global_scheduler = scheduler.Scheduler.init();
+
+    // Create a kernel process.
+    kernel_proc = proc.Process.init(0, "kernel", heap.allocator);
+
+    // Create a test thread.
+    serial.print("Creating test thread...\n", .{});
+    const test_thread = kernel_proc.createThread(testThread, 16384, heap.allocator) catch unreachable;
+    scheduler.global_scheduler.enqueue(test_thread);
+
+    // Register the current execution as the first thread.
+    const main_thread = heap.allocator.create(proc.Thread) catch unreachable;
+    main_thread.* = .{
+        .id = 1,
+        .state = .RUNNING,
+        .stack_pointer = 0,
+        .process = &kernel_proc,
+    };
+    scheduler.global_scheduler.current_thread = main_thread;
+
     // Enable interrupts.
-    term.print("Enabling Interrupts...\n", .{});
+    serial.print("Enabling interrupts...\n", .{});
     x64.sti();
 
-    // Initialize and run the shell.
-    var shell_instance = shell.Shell.init();
-    shell_instance.run();
+    // Start the scheduler.
+    serial.print("Starting scheduler...\n", .{});
+    while (true) {
+        serial.print("[MAIN] Yielding...\n", .{});
+        scheduler.global_scheduler.yield();
+        serial.print("[MAIN] Back!\n", .{});
+        // Small delay
+        var i: usize = 0;
+        while (i < 1000000) : (i += 1) {
+            asm volatile ("nop");
+        }
+    }
+}
 
-    // Loop forever (unreachable).
-    x64.hang();
+fn testThread() void {
+    while (true) {
+        serial.print("[TEST] Hello from test thread!\n", .{});
+        scheduler.global_scheduler.yield();
+        // Small delay
+        var i: usize = 0;
+        while (i < 1000000) : (i += 1) {
+            asm volatile ("nop");
+        }
+    }
 }

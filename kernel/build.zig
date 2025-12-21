@@ -37,8 +37,9 @@ pub fn build(b: *std.Build) void {
         .link_libc = false,
         .link_libcpp = false,
     });
-    // Add some assembly code to the build (Interrupt Service Routines).
+    // Add some assembly code to the build (Interrupt Service Routines and Context Switching).
     kernel_module.addAssemblyFile(b.path("src/interrupt/isr_stubs.s"));
+    kernel_module.addAssemblyFile(b.path("src/proc/switch.s"));
 
     // Add the Limine library as a dependency.
     const limine = b.dependency("limine", .{});
