@@ -40,18 +40,186 @@ var write_index: usize = 0;
 var read_index: usize = 0;
 var count: usize = 0;
 
+/// Global state to track if we have a second channel (mouse).
+var has_dual_channel: bool = false;
+
 /// Initializes the PS/2 controller and keyboard.
 fn init() void {
-    // Register the keyboard interrupt handler.
+    term.print("Initializing PS/2 Controller...\n", .{});
+
+    // 1. Disable Devices
+    sendCmd(0xAD); // Disable Port 1
+    sendCmd(0xA7); // Disable Port 2
+
+    // 2. Flush The Output Buffer
+    flushBuffer();
+
+    // 3. Set the Controller Configuration Byte
+    sendCmd(0x20); // Read Config
+    var config = readData();
+    config &= ~@as(u8, 0x03); // Disable IRQs (bits 0 and 1)
+    config |= @as(u8, 0x40); // Enable Translation (bit 6)
+    sendCmdArg(0x60, config); // Write Config
+
+    // 4. Perform Controller Self Test
+    sendCmd(0xAA);
+    if (readData() != 0x55) {
+        term.print("PS/2 Controller Self Test Failed!\n", .{});
+        return;
+    }
+
+    // 5. Determine If There Are 2 Channels
+    sendCmd(0xA8); // Enable Port 2
+    sendCmd(0x20); // Read Config
+    config = readData();
+    if ((config & 0x20) != 0) {
+        has_dual_channel = false;
+        term.print("PS/2 Controller is Single Channel.\n", .{});
+    } else {
+        has_dual_channel = true;
+        term.print("PS/2 Controller is Dual Channel.\n", .{});
+        // Disable Port 2 again
+        sendCmd(0xA7);
+    }
+
+    // 6. Perform Interface Tests
+    sendCmd(0xAB); // Test Port 1
+    if (readData() != 0x00) {
+        term.print("PS/2 Port 1 Test Failed!\n", .{});
+    }
+
+    if (has_dual_channel) {
+        sendCmd(0xA9); // Test Port 2
+        if (readData() != 0x00) {
+            term.print("PS/2 Port 2 Test Failed!\n", .{});
+        }
+    }
+
+    // 7. Enable Devices
+    sendCmd(0xAE); // Enable Port 1
+    if (has_dual_channel) {
+        sendCmd(0xA8); // Enable Port 2
+    }
+
+    // 8. Enable IRQs
+    sendCmd(0x20); // Read Config
+    config = readData();
+    config |= 0x01; // Enable IRQ 1
+    if (has_dual_channel) {
+        config |= 0x02; // Enable IRQ 12
+    }
+    sendCmdArg(0x60, config);
+
+    // 9. Reset Keyboard
+    resetDevice(false);
+
+    // 10. Enable Keyboard Scanning
+    sendDataToDevice(false, 0xF4);
+    _ = readData(); // Acknowledge
+
+    // Register Keyboard Handler
     isr.registerHandler(KEYBOARD_VECTOR, keyboardHandler);
+}
 
-    // Enable the keyboard port.
-    // We assume the PS/2 controller is already in a somewhat sane state from BIOS/UEFI.
-    // A full initialization sequence would be more robust but complex.
+/// Mouse interrupt vector.
+const MOUSE_IRQ = 12;
+const MOUSE_VECTOR = 0x2C; // Remapped IRQ 12
 
-    // Flush the output buffer.
-    while ((x64.inb(STATUS_PORT) & 1) != 0) {
+/// Mouse packet state.
+var mouse_cycle: u8 = 0;
+var mouse_byte: [3]u8 = undefined;
+
+/// Initializes the mouse.
+pub fn initMouse() void {
+    if (!has_dual_channel) {
+        term.print("No Mouse Port detected.\n", .{});
+        return;
+    }
+
+    term.print("Initializing Mouse...\n", .{});
+
+    // Register Mouse Handler
+    isr.registerHandler(MOUSE_VECTOR, mouseHandler);
+
+    // Reset Mouse
+    resetDevice(true);
+
+    // Enable Mouse Scanning
+    sendDataToDevice(true, 0xF4);
+    _ = readData(); // Acknowledge
+
+    term.print("Mouse Initialized.\n", .{});
+}
+
+/// Waits for the write buffer to be empty.
+fn waitWrite() void {
+    var time_out: u32 = 100000;
+    while (time_out > 0) : (time_out -= 1) {
+        if ((x64.inb(STATUS_PORT) & 2) == 0) {
+            return;
+        }
+    }
+}
+
+/// Waits for the read buffer to be full.
+fn waitRead() void {
+    var time_out: u32 = 100000;
+    while (time_out > 0) : (time_out -= 1) {
+        if ((x64.inb(STATUS_PORT) & 1) == 1) {
+            return;
+        }
+    }
+}
+
+/// Sends a command to the PS/2 controller.
+fn sendCmd(cmd: u8) void {
+    waitWrite();
+    x64.outb(COMMAND_PORT, cmd);
+}
+
+/// Sends a command with an argument to the PS/2 controller.
+fn sendCmdArg(cmd: u8, arg: u8) void {
+    waitWrite();
+    x64.outb(COMMAND_PORT, cmd);
+    waitWrite();
+    x64.outb(DATA_PORT, arg);
+}
+
+/// Reads a byte from the data port.
+fn readData() u8 {
+    waitRead();
+    return x64.inb(DATA_PORT);
+}
+
+/// Flushes the output buffer.
+fn flushBuffer() void {
+    var temp = x64.inb(STATUS_PORT);
+    while ((temp & 1) != 0) {
         _ = x64.inb(DATA_PORT);
+        temp = x64.inb(STATUS_PORT);
+    }
+}
+
+/// Sends data to a device (Keyboard or Mouse).
+fn sendDataToDevice(is_mouse: bool, data: u8) void {
+    if (is_mouse) {
+        sendCmd(0xD4);
+    }
+    waitWrite();
+    x64.outb(DATA_PORT, data);
+}
+
+/// Resets a device.
+fn resetDevice(is_mouse: bool) void {
+    sendDataToDevice(is_mouse, 0xFF);
+    const ack = readData();
+    if (ack != 0xFA) {
+        term.print("Device Reset failed (No ACK)!\n", .{});
+        return;
+    }
+    const res = readData();
+    if (res != 0xAA) {
+        term.print("Device Reset failed (Self-test failed)!\n", .{});
     }
 }
 
@@ -130,10 +298,9 @@ fn keyboardHandler(ctx: *isr.InterruptStack) callconv(.c) void {
     defer pic.sendEOI(KEYBOARD_IRQ);
 
     // ALWAYS read the data port to drain the 8042 buffer
-    // This is critical - if we don't read it, the controller locks up
     const data = x64.inb(DATA_PORT);
 
-    // Now check status to see what kind of data it was
+    // Now check status
     const status = x64.inb(STATUS_PORT);
 
     // Dispatch based on whether it was mouse data (bit 5)
@@ -144,80 +311,6 @@ fn keyboardHandler(ctx: *isr.InterruptStack) callconv(.c) void {
     }
 }
 
-/// Mouse interrupt vector.
-const MOUSE_IRQ = 12;
-const MOUSE_VECTOR = 0x2C; // Remapped IRQ 12
-
-/// Mouse packet state.
-var mouse_cycle: u8 = 0;
-var mouse_byte: [3]u8 = undefined;
-
-/// Initializes the mouse.
-pub fn initMouse() void {
-    term.print("Initializing Mouse...\n", .{});
-    // Register the mouse interrupt handler.
-    isr.registerHandler(MOUSE_VECTOR, mouseHandler);
-
-    // Enable the auxiliary device (mouse).
-    mouseWait(1);
-    x64.outb(COMMAND_PORT, 0xA8);
-
-    // Enable the interrupts.
-    mouseWait(1);
-    x64.outb(COMMAND_PORT, 0x20); // Get Compaq Status Byte
-    mouseWait(0);
-    var status = x64.inb(DATA_PORT);
-    status |= 1; // Enable IRQ 1 (Keyboard)
-    status |= 2; // Enable IRQ 12 (Mouse)
-    status &= ~@as(u8, 0x20); // Disable Mouse Clock
-    mouseWait(1);
-    x64.outb(COMMAND_PORT, 0x60); // Set Compaq Status Byte
-    mouseWait(1);
-    x64.outb(DATA_PORT, status);
-
-    // Use default settings.
-    mouseWrite(0xF6);
-    _ = mouseRead(); // Acknowledge
-
-    // Enable streaming.
-    mouseWrite(0xF4);
-    _ = mouseRead(); // Acknowledge
-    term.print("Mouse Initialized.\n", .{});
-}
-
-/// Waits for the PS/2 controller to be ready.
-/// type: 0 for data, 1 for signal.
-fn mouseWait(wait_type: u8) void {
-    var time_out: u32 = 100000;
-    if (wait_type == 0) {
-        while (time_out > 0) : (time_out -= 1) {
-            if ((x64.inb(STATUS_PORT) & 1) == 1) {
-                return;
-            }
-        }
-    } else {
-        while (time_out > 0) : (time_out -= 1) {
-            if ((x64.inb(STATUS_PORT) & 2) == 0) {
-                return;
-            }
-        }
-    }
-}
-
-/// Writes a byte to the mouse.
-fn mouseWrite(value: u8) void {
-    mouseWait(1);
-    x64.outb(COMMAND_PORT, 0xD4); // Tell the controller we want to send data to the mouse
-    mouseWait(1);
-    x64.outb(DATA_PORT, value);
-}
-
-/// Reads a byte from the mouse.
-fn mouseRead() u8 {
-    mouseWait(0);
-    return x64.inb(DATA_PORT);
-}
-
 /// Mouse interrupt handler.
 fn mouseHandler(ctx: *isr.InterruptStack) callconv(.c) void {
     _ = ctx;
@@ -226,10 +319,9 @@ fn mouseHandler(ctx: *isr.InterruptStack) callconv(.c) void {
     defer pic.sendEOI(MOUSE_IRQ);
 
     // ALWAYS read the data port to drain the 8042 buffer
-    // This is critical - if we don't read it, the controller locks up
     const data = x64.inb(DATA_PORT);
 
-    // Now check status to see what kind of data it was
+    // Now check status
     const status = x64.inb(STATUS_PORT);
 
     // Dispatch based on whether it was mouse data (bit 5)

@@ -62,6 +62,9 @@ export fn _start() callconv(.c) noreturn {
     // Unmask Mouse IRQ (IRQ 12).
     term.print("Unmasking IRQ 12...\n", .{});
     pic.unmask(12);
+    // Unmask Cascade IRQ (IRQ 2) so Slave PIC works.
+    term.print("Unmasking IRQ 2 (Cascade)...\n", .{});
+    pic.unmask(2);
 
     driver.DriverManager.register(ps2.ps2_driver);
     driver.DriverManager.initialize();
