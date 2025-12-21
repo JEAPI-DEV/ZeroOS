@@ -77,25 +77,16 @@ pub fn getKey() u8 {
     return char;
 }
 
-/// Keyboard interrupt handler.
-fn keyboardHandler(ctx: *isr.InterruptStack) callconv(.c) void {
-    _ = ctx;
-
-    // Read the scancode.
-    const scancode = x64.inb(DATA_PORT);
-
-    // Send End of Interrupt (EOI) to the PIC.
-    // We must send this regardless of whether we process the key or not.
-    defer pic.sendEOI(KEYBOARD_IRQ);
-
+/// Handles a byte from the keyboard.
+fn handleKeyboardByte(byte: u8) void {
     // If the top bit is set, it's a key release.
-    if ((scancode & 0x80) != 0) {
+    if ((byte & 0x80) != 0) {
         return;
     }
 
     // Convert to ASCII.
-    if (scancode < scancode_set1.len) {
-        const char = scancode_set1[scancode];
+    if (byte < scancode_set1.len) {
+        const char = scancode_set1[byte];
         if (char != 0) {
             // Push to buffer if not full.
             if (count < BUFFER_SIZE) {
@@ -104,5 +95,147 @@ fn keyboardHandler(ctx: *isr.InterruptStack) callconv(.c) void {
                 count += 1;
             }
         }
+    }
+}
+
+/// Handles a byte from the mouse.
+fn handleMouseByte(byte: u8) void {
+    mouse_byte[mouse_cycle] = byte;
+    mouse_cycle += 1;
+
+    if (mouse_cycle == 3) {
+        mouse_cycle = 0;
+
+        const flags = mouse_byte[0];
+        const x_mov = @as(i8, @bitCast(mouse_byte[1]));
+        const y_mov = @as(i8, @bitCast(mouse_byte[2]));
+        _ = x_mov;
+        _ = y_mov;
+
+        // Let's print only on click to avoid spamming.
+        if ((flags & 1) != 0) {
+            term.print("Left Click\n", .{});
+        }
+        if ((flags & 2) != 0) {
+            term.print("Right Click\n", .{});
+        }
+    }
+}
+
+/// Keyboard interrupt handler.
+fn keyboardHandler(ctx: *isr.InterruptStack) callconv(.c) void {
+    _ = ctx;
+
+    // Send End of Interrupt (EOI) to the PIC.
+    defer pic.sendEOI(KEYBOARD_IRQ);
+
+    // ALWAYS read the data port to drain the 8042 buffer
+    // This is critical - if we don't read it, the controller locks up
+    const data = x64.inb(DATA_PORT);
+
+    // Now check status to see what kind of data it was
+    const status = x64.inb(STATUS_PORT);
+
+    // Dispatch based on whether it was mouse data (bit 5)
+    if ((status & 0x20) != 0) {
+        handleMouseByte(data);
+    } else {
+        handleKeyboardByte(data);
+    }
+}
+
+/// Mouse interrupt vector.
+const MOUSE_IRQ = 12;
+const MOUSE_VECTOR = 0x2C; // Remapped IRQ 12
+
+/// Mouse packet state.
+var mouse_cycle: u8 = 0;
+var mouse_byte: [3]u8 = undefined;
+
+/// Initializes the mouse.
+pub fn initMouse() void {
+    term.print("Initializing Mouse...\n", .{});
+    // Register the mouse interrupt handler.
+    isr.registerHandler(MOUSE_VECTOR, mouseHandler);
+
+    // Enable the auxiliary device (mouse).
+    mouseWait(1);
+    x64.outb(COMMAND_PORT, 0xA8);
+
+    // Enable the interrupts.
+    mouseWait(1);
+    x64.outb(COMMAND_PORT, 0x20); // Get Compaq Status Byte
+    mouseWait(0);
+    var status = x64.inb(DATA_PORT);
+    status |= 1; // Enable IRQ 1 (Keyboard)
+    status |= 2; // Enable IRQ 12 (Mouse)
+    status &= ~@as(u8, 0x20); // Disable Mouse Clock
+    mouseWait(1);
+    x64.outb(COMMAND_PORT, 0x60); // Set Compaq Status Byte
+    mouseWait(1);
+    x64.outb(DATA_PORT, status);
+
+    // Use default settings.
+    mouseWrite(0xF6);
+    _ = mouseRead(); // Acknowledge
+
+    // Enable streaming.
+    mouseWrite(0xF4);
+    _ = mouseRead(); // Acknowledge
+    term.print("Mouse Initialized.\n", .{});
+}
+
+/// Waits for the PS/2 controller to be ready.
+/// type: 0 for data, 1 for signal.
+fn mouseWait(wait_type: u8) void {
+    var time_out: u32 = 100000;
+    if (wait_type == 0) {
+        while (time_out > 0) : (time_out -= 1) {
+            if ((x64.inb(STATUS_PORT) & 1) == 1) {
+                return;
+            }
+        }
+    } else {
+        while (time_out > 0) : (time_out -= 1) {
+            if ((x64.inb(STATUS_PORT) & 2) == 0) {
+                return;
+            }
+        }
+    }
+}
+
+/// Writes a byte to the mouse.
+fn mouseWrite(value: u8) void {
+    mouseWait(1);
+    x64.outb(COMMAND_PORT, 0xD4); // Tell the controller we want to send data to the mouse
+    mouseWait(1);
+    x64.outb(DATA_PORT, value);
+}
+
+/// Reads a byte from the mouse.
+fn mouseRead() u8 {
+    mouseWait(0);
+    return x64.inb(DATA_PORT);
+}
+
+/// Mouse interrupt handler.
+fn mouseHandler(ctx: *isr.InterruptStack) callconv(.c) void {
+    _ = ctx;
+
+    // Send EOI.
+    defer pic.sendEOI(MOUSE_IRQ);
+
+    // ALWAYS read the data port to drain the 8042 buffer
+    // This is critical - if we don't read it, the controller locks up
+    const data = x64.inb(DATA_PORT);
+
+    // Now check status to see what kind of data it was
+    const status = x64.inb(STATUS_PORT);
+
+    // Dispatch based on whether it was mouse data (bit 5)
+    if ((status & 0x20) != 0) {
+        handleMouseByte(data);
+    } else {
+        handleKeyboardByte(data);
     }
 }

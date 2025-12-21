@@ -56,6 +56,8 @@ pub fn remap(offset1: u8, offset2: u8) void {
     // Restore masks.
     x64.outb(PIC1_DATA, a1);
     x64.outb(PIC2_DATA, a2);
+
+    // term.print("PIC remapped\n", .{}); // Need to import term if we want to print here, but let's keep it simple for now.
 }
 
 /// Disables the PIC.

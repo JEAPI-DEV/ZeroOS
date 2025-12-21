@@ -54,14 +54,23 @@ export fn _start() callconv(.c) noreturn {
     // Initialize drivers.
     const pic = @import("./driver/pic.zig");
     // Remap PIC to 0x20-0x27 and 0x28-0x2F.
+    term.print("Remapping PIC...\n", .{});
     pic.remap(0x20, 0x28);
     // Unmask Keyboard IRQ (IRQ 1).
+    term.print("Unmasking IRQ 1...\n", .{});
     pic.unmask(1);
+    // Unmask Mouse IRQ (IRQ 12).
+    term.print("Unmasking IRQ 12...\n", .{});
+    pic.unmask(12);
 
     driver.DriverManager.register(ps2.ps2_driver);
     driver.DriverManager.initialize();
 
+    // Initialize Mouse.
+    ps2.initMouse();
+
     // Enable interrupts.
+    term.print("Enabling Interrupts...\n", .{});
     x64.sti();
 
     // Initialize and run the shell.
