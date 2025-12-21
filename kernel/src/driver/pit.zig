@@ -22,7 +22,11 @@ pub fn init(frequency: u32) void {
 }
 
 /// PIT interrupt handler.
-pub fn handleInterrupt() void {
+pub fn handleInterrupt(stack: *@import("../interrupt/isr.zig").InterruptStack) callconv(.c) void {
+    _ = stack;
+    const pic = @import("./pic.zig");
     const scheduler = @import("../proc/scheduler.zig");
+
+    pic.sendEOI(0);
     scheduler.global_scheduler.tick();
 }

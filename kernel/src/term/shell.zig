@@ -4,6 +4,7 @@ const std = @import("std");
 const ps2 = @import("../driver/ps2.zig");
 const term = @import("terminal.zig");
 const x64 = @import("../cpu/x64.zig");
+const serial = @import("../driver/serial.zig");
 
 /// Maximum command length.
 const MAX_COMMAND_LEN = 256;
@@ -22,6 +23,7 @@ pub const Shell = struct {
 
     /// Runs the shell loop.
     pub fn run(self: *Shell) void {
+        serial.print("[SHELL] Starting...\n", .{});
         term.print("\nWelcome to Zero Shell!\n", .{});
         term.print("Type 'help' for a list of commands.\n\n", .{});
 

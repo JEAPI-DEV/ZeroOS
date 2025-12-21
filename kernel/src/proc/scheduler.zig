@@ -4,6 +4,7 @@ const std = @import("std");
 const process = @import("process.zig");
 const spinlock = @import("../sync/spinlock.zig");
 const x64 = @import("../cpu/x64.zig");
+const serial = @import("../driver/serial.zig");
 
 extern fn switchContext(old: *process.Thread.Context, new: *process.Thread.Context) void;
 
@@ -88,10 +89,9 @@ pub const Scheduler = struct {
 
     /// Picks the next thread to run and switches to it.
     pub fn schedule(self: *Scheduler) void {
-        const serial = @import("../driver/serial.zig");
-
-        // Disable interrupts during scheduling
-        asm volatile ("cli");
+        // Disable interrupts during scheduling to ensure atomicity
+        const flags = x64.saveAndDisableInterrupts();
+        defer x64.restoreInterrupts(flags);
 
         self.lock.lock();
 
@@ -113,21 +113,23 @@ pub const Scheduler = struct {
                     self.ready_queue.append(old_node);
                 }
 
-                serial.print("[SCHED] {} -> {}\n", .{ old.id, next_thread.id });
+                // serial.print("[SCHED] {} -> {}\n", .{old.id, next_thread.id});
                 self.lock.unlock();
                 switchContext(&old.context, &next_thread.context);
-                // Re-enable interrupts after switching back
-                asm volatile ("sti");
             } else {
                 // First thread ever
-                serial.print("[SCHED] Start {}\n", .{next_thread.id});
                 self.lock.unlock();
-                asm volatile ("sti");
             }
         } else {
             self.lock.unlock();
-            asm volatile ("sti");
         }
+    }
+
+    /// Called by the timer interrupt.
+    pub fn tick(self: *Scheduler) void {
+        // For now, just yield on every tick to verify preemption.
+        // In a real OS, we would check a time slice.
+        self.schedule();
     }
 
     /// Yields the CPU to the next thread.

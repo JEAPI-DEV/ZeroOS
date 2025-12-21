@@ -5,6 +5,7 @@ const isr = @import("../interrupt/isr.zig");
 const pic = @import("pic.zig");
 const term = @import("../term/terminal.zig");
 const x64 = @import("../cpu/x64.zig");
+const serial = @import("serial.zig");
 
 /// The PS/2 driver instance.
 pub const ps2_driver = driver.Driver{
@@ -235,10 +236,10 @@ fn resetDevice(is_mouse: bool) void {
 /// Returns the next character from the keyboard buffer.
 /// This function blocks until a character is available.
 pub fn getKey() u8 {
+    const scheduler = @import("../proc/scheduler.zig");
     // Wait for data.
     while (count == 0) {
-        x64.ioWait();
-        asm volatile ("hlt");
+        scheduler.global_scheduler.yield();
     }
 
     // Disable interrupts to ensure atomicity.
@@ -248,6 +249,8 @@ pub fn getKey() u8 {
     read_index = (read_index + 1) % BUFFER_SIZE;
     count -= 1;
 
+    serial.print("[PS2] getKey: {c}\n", .{char});
+
     // Re-enable interrupts.
     asm volatile ("sti");
 
@@ -256,6 +259,7 @@ pub fn getKey() u8 {
 
 /// Handles a byte from the keyboard.
 fn handleKeyboardByte(byte: u8) void {
+    serial.print("[PS2] handleKeyboardByte: {x}\n", .{byte});
     // If the top bit is set, it's a key release.
     if ((byte & 0x80) != 0) {
         return;
@@ -330,6 +334,7 @@ fn drainBuffer() void {
 /// Keyboard interrupt handler.
 fn keyboardHandler(ctx: *isr.InterruptStack) callconv(.c) void {
     _ = ctx;
+    serial.print("[PS2] Keyboard IRQ\n", .{});
     drainBuffer();
     pic.sendEOI(KEYBOARD_IRQ);
 }
@@ -337,6 +342,7 @@ fn keyboardHandler(ctx: *isr.InterruptStack) callconv(.c) void {
 /// Mouse interrupt handler.
 fn mouseHandler(ctx: *isr.InterruptStack) callconv(.c) void {
     _ = ctx;
+    serial.print("[PS2] Mouse IRQ\n", .{});
     drainBuffer();
     pic.sendEOI(MOUSE_IRQ);
 }

@@ -18,6 +18,8 @@ const shell = @import("./term/shell.zig");
 const serial = @import("./driver/serial.zig");
 const proc = @import("./proc/process.zig");
 const scheduler = @import("./proc/scheduler.zig");
+const pit = @import("./driver/pit.zig");
+const isr = @import("./interrupt/isr.zig");
 
 const MEGABYTE = phys.MEGABYTE;
 
@@ -72,11 +74,21 @@ export fn _start() callconv(.c) noreturn {
     driver.DriverManager.initialize();
     ps2.initMouse();
 
+    // Initialize PIT (100Hz).
+    pit.init(100);
+    isr.registerHandler(32, pit.handleInterrupt);
+    pic.unmask(0);
+
     // Initialize scheduler.
     scheduler.global_scheduler = scheduler.Scheduler.init();
 
     // Create a kernel process.
     kernel_proc = proc.Process.init(0, "kernel", heap.allocator);
+
+    // Create a shell thread.
+    serial.print("Creating shell thread...\n", .{});
+    const shell_thread = kernel_proc.createThread(shellThread, 32768, heap.allocator) catch unreachable;
+    scheduler.global_scheduler.enqueue(shell_thread);
 
     // Create a test thread.
     serial.print("Creating test thread...\n", .{});
@@ -100,24 +112,25 @@ export fn _start() callconv(.c) noreturn {
     // Start the scheduler.
     serial.print("Starting scheduler...\n", .{});
     while (true) {
-        serial.print("[MAIN] Yielding...\n", .{});
-        scheduler.global_scheduler.yield();
-        serial.print("[MAIN] Back!\n", .{});
-        // Small delay
-        var i: usize = 0;
-        while (i < 1000000) : (i += 1) {
-            asm volatile ("nop");
-        }
+        // The main thread just hangs out now, preemption will handle the rest.
+        x64.ioWait();
+        asm volatile ("hlt");
     }
 }
 
+fn shellThread() void {
+    x64.sti();
+    var s = shell.Shell.init();
+    s.run();
+}
+
 fn testThread() void {
+    x64.sti();
     while (true) {
-        serial.print("[TEST] Hello from test thread!\n", .{});
-        scheduler.global_scheduler.yield();
-        // Small delay
+        serial.print("[TEST] Heartbeat...\n", .{});
+        // Large delay
         var i: usize = 0;
-        while (i < 1000000) : (i += 1) {
+        while (i < 100000000) : (i += 1) {
             asm volatile ("nop");
         }
     }

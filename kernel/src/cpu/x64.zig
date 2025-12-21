@@ -21,6 +21,34 @@ pub inline fn sti() void {
     asm volatile ("sti");
 }
 
+/// Disables interrupts.
+pub inline fn cli() void {
+    asm volatile ("cli");
+}
+
+/// Saves the current interrupt state and disables interrupts.
+pub inline fn saveAndDisableInterrupts() u64 {
+    var rflags: u64 = undefined;
+    asm volatile (
+        \\pushfq
+        \\pop %[rflags]
+        \\cli
+        : [rflags] "=r" (rflags),
+    );
+    return rflags;
+}
+
+/// Restores the interrupt state from the given rflags.
+pub inline fn restoreInterrupts(rflags: u64) void {
+    asm volatile (
+        \\push %[rflags]
+        \\popfq
+        :
+        : [rflags] "r" (rflags),
+        : .{ .flags = true }
+    );
+}
+
 /// Loads a new Interrupt Descriptor Table.
 ///
 /// Parameters:

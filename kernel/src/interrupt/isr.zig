@@ -1,6 +1,7 @@
 const idt = @import("./idt.zig");
 const term = @import("../term/terminal.zig");
 const x64 = @import("../cpu/x64.zig");
+const serial = @import("../driver/serial.zig");
 
 const Dpl = @import("../cpu/gdt.zig").Dpl;
 
@@ -170,6 +171,7 @@ pub fn registerHandler(n: u8, handler: ?*const HandlerFunction) void {
 /// Default handler for unregistered interrupt vectors.
 fn unhandledInterrupt(stack: *InterruptStack) callconv(.c) noreturn {
     var n = stack.interrupt_number;
+    serial.print("[ISR] Unhandled interrupt: {}\n", .{n});
 
     switch (n) {
         EXCEPTION_0...EXCEPTION_31 => {
