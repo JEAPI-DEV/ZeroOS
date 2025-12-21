@@ -144,6 +144,9 @@ pub fn initMouse() void {
     // Reset Mouse
     resetDevice(true);
 
+    // Reset cycle state
+    mouse_cycle = 0;
+
     // Enable Mouse Scanning
     sendDataToDevice(true, 0xF4);
     _ = readData(); // Acknowledge
@@ -268,24 +271,37 @@ fn handleKeyboardByte(byte: u8) void {
 
 /// Handles a byte from the mouse.
 fn handleMouseByte(byte: u8) void {
+    // Byte 0: Flags (Bit 3 must be 1)
+    if (mouse_cycle == 0) {
+        if ((byte & 0x08) == 0) {
+            // Not a valid first byte, likely out of sync.
+            return;
+        }
+    }
+
     mouse_byte[mouse_cycle] = byte;
     mouse_cycle += 1;
 
     if (mouse_cycle == 3) {
         mouse_cycle = 0;
 
-        const flags = mouse_byte[0];
-        const x_mov = @as(i8, @bitCast(mouse_byte[1]));
-        const y_mov = @as(i8, @bitCast(mouse_byte[2]));
+        const flags = @as(u16, mouse_byte[0]);
+        const x_raw = @as(u16, mouse_byte[1]);
+        const y_raw = @as(u16, mouse_byte[2]);
+
+        // 9-bit signed extension logic
+        const x_mov = @as(i16, @bitCast(x_raw - ((flags << 4) & 0x100)));
+        const y_mov = @as(i16, @bitCast(y_raw - ((flags << 3) & 0x100)));
+
         _ = x_mov;
         _ = y_mov;
 
         // Let's print only on click to avoid spamming.
         if ((flags & 1) != 0) {
-            term.print("Left Click\n", .{});
+            term.print("Left Click [Raw: {x} {x} {x}]\n", .{ mouse_byte[0], mouse_byte[1], mouse_byte[2] });
         }
         if ((flags & 2) != 0) {
-            term.print("Right Click\n", .{});
+            term.print("Right Click [Raw: {x} {x} {x}]\n", .{ mouse_byte[0], mouse_byte[1], mouse_byte[2] });
         }
     }
 }
