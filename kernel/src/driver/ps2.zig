@@ -238,7 +238,9 @@ fn resetDevice(is_mouse: bool) void {
 pub fn getKey() u8 {
     const scheduler = @import("../proc/scheduler.zig");
     // Wait for data.
-    while (count == 0) {
+    while (true) {
+        const c = @as(*volatile usize, &count).*;
+        if (c > 0) break;
         scheduler.global_scheduler.yield();
     }
 
@@ -249,7 +251,7 @@ pub fn getKey() u8 {
     read_index = (read_index + 1) % BUFFER_SIZE;
     count -= 1;
 
-    serial.print("[PS2] getKey: {c}\n", .{char});
+    serial.print("[PS2] getKey returning: {c} (count now {})\n", .{ char, count });
 
     // Re-enable interrupts.
     asm volatile ("sti");

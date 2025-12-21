@@ -90,10 +90,10 @@ export fn _start() callconv(.c) noreturn {
     const shell_thread = kernel_proc.createThread(shellThread, 32768, heap.allocator) catch unreachable;
     scheduler.global_scheduler.enqueue(shell_thread);
 
-    // Create a test thread.
-    serial.print("Creating test thread...\n", .{});
-    const test_thread = kernel_proc.createThread(testThread, 16384, heap.allocator) catch unreachable;
-    scheduler.global_scheduler.enqueue(test_thread);
+    // // Create a test thread.
+    // serial.print("Creating test thread...\n", .{});
+    // const test_thread = kernel_proc.createThread(testThread, 16384, heap.allocator) catch unreachable;
+    // scheduler.global_scheduler.enqueue(test_thread);
 
     // Register the current execution as the first thread.
     const main_thread = heap.allocator.create(proc.Thread) catch unreachable;
@@ -122,16 +122,4 @@ fn shellThread() void {
     x64.sti();
     var s = shell.Shell.init();
     s.run();
-}
-
-fn testThread() void {
-    x64.sti();
-    while (true) {
-        serial.print("[TEST] Heartbeat...\n", .{});
-        // Large delay
-        var i: usize = 0;
-        while (i < 100000000) : (i += 1) {
-            asm volatile ("nop");
-        }
-    }
 }
