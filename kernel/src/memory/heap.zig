@@ -276,3 +276,30 @@ fn free(context: *anyopaque, memory: []u8, alignment: std.mem.Alignment, ret_add
     block.tryMergeRight();
     block.tryMergeLeft();
 }
+
+/// Helper for C-compatible free (void* ptr).
+pub fn c_free(ptr: ?*anyopaque) void {
+    if (ptr) |p| {
+        const u8_ptr = @as([*]u8, @ptrCast(p));
+        // We need to re-create the slice to call free ?
+        // No, `free` (internal) takes a slice but only uses .ptr and ignores len for metadata access?
+        // Let's check `free`.
+        // It calls Block.fromData(memory.ptr).
+        // It ignores memory.len EXCEPT maybe for debug asserts or if we changed `free`.
+
+        // Actually, the `free` function signature is:
+        // fn free(context: *anyopaque, memory: []u8, alignment: std.mem.Alignment, ret_addr: usize) void
+
+        // It's private! We can't call it directly from here easily unless we wrap it.
+        // But we are IN heap.zig.
+        // We can just duplicate the logic or call a helper.
+
+        const flags = x64.saveAndDisableInterrupts();
+        defer x64.restoreInterrupts(flags);
+
+        const block = Block.fromData(u8_ptr);
+        block.free();
+        block.tryMergeRight();
+        block.tryMergeLeft();
+    }
+}

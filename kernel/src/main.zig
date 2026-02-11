@@ -23,6 +23,15 @@ const isr = @import("./interrupt/isr.zig");
 const vfs = @import("./fs/vfs.zig");
 const ramfs = @import("./fs/ramfs.zig");
 const pci = @import("./driver/pci.zig");
+const libc = @import("./libc/libc.zig");
+const mutex = @import("./sync/mutex.zig");
+const condition = @import("./sync/condition.zig");
+
+comptime {
+    // _ = libc;
+    _ = mutex;
+    _ = condition;
+}
 
 const MEGABYTE = phys.MEGABYTE;
 
@@ -90,16 +99,16 @@ export fn _start() callconv(.c) noreturn {
     isr.registerHandler(32, pit.handleInterrupt);
     pic.unmask(0);
 
-    // Initialize scheduler.
-    scheduler.global_scheduler = scheduler.Scheduler.init();
+    // Initialize the scheduler.
+    const sched = scheduler.Scheduler.init();
 
     // Create a kernel process.
     kernel_proc = proc.Process.init(0, "kernel", heap.allocator);
 
     // Create a shell thread.
     serial.print("Creating shell thread...\n", .{});
-    const shell_thread = kernel_proc.createThread(shellThread, 32768, heap.allocator) catch unreachable;
-    scheduler.global_scheduler.enqueue(shell_thread);
+    const shell_thread = kernel_proc.createThread(shellThread, null, 32768, heap.allocator) catch unreachable;
+    sched.enqueue(shell_thread);
 
     // // Create a test thread.
     // serial.print("Creating test thread...\n", .{});
@@ -114,7 +123,7 @@ export fn _start() callconv(.c) noreturn {
         .stack_pointer = 0,
         .process = &kernel_proc,
     };
-    scheduler.global_scheduler.current_thread = main_thread;
+    sched.current_thread = main_thread;
 
     // Enable interrupts.
     serial.print("Enabling interrupts...\n", .{});
@@ -122,6 +131,7 @@ export fn _start() callconv(.c) noreturn {
 
     // Start the scheduler.
     serial.print("Starting scheduler...\n", .{});
+
     while (true) {
         // The main thread just hangs out now, preemption will handle the rest.
         x64.ioWait();
@@ -129,7 +139,7 @@ export fn _start() callconv(.c) noreturn {
     }
 }
 
-fn shellThread() void {
+fn shellThread(_: ?*anyopaque) void {
     x64.sti();
     var s = shell.Shell.init();
     s.run();

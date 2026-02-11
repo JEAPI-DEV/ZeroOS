@@ -22,3 +22,12 @@ switchContext:
     pop %rbx
     pop %rbp
     ret
+
+# entry: %rbx, arg: %r12, exit: %r13
+.global thread_entry_stub
+thread_entry_stub:
+    sti             # Enable interrupts for new threads
+    mov %r12, %rdi  # Move arg to 1st argument register
+    call *%rbx      # Call thread function
+    call *%r13      # Call thread exit
+    hlt             # Should never be reached

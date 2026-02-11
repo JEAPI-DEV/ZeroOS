@@ -49,8 +49,9 @@ pub const Scheduler = struct {
     lock: spinlock.Spinlock = .{},
     thread_count: usize = 0,
 
-    pub fn init() Scheduler {
-        return Scheduler{};
+    pub fn init() *Scheduler {
+        instance = Scheduler{};
+        return &instance;
     }
 
     fn allocNode(self: *Scheduler) *ThreadQueue.Node {
@@ -90,12 +91,14 @@ pub const Scheduler = struct {
             const next_thread = node.data;
             self.freeNode(node);
 
+            // serial.print("[SCHED] Switch {} -> {}\n", .{ if (self.current_thread) |t| t.id else 999, next_thread.id });
+
             const old_thread = self.current_thread;
             self.current_thread = next_thread;
             next_thread.state = .RUNNING;
 
             if (old_thread) |old| {
-                if (old.state == .RUNNING) {
+                if (old.state == .RUNNING or old.state == .READY) {
                     old.state = .READY;
                     // Re-enqueue the old thread
                     const old_node = self.allocNode();
@@ -103,7 +106,6 @@ pub const Scheduler = struct {
                     self.ready_queue.append(old_node);
                 }
 
-                //serial.print("[SCHED] {} -> {}\n", .{ old.id, next_thread.id });
                 self.lock.unlock();
                 switchContext(&old.context, &next_thread.context);
             } else {
@@ -111,6 +113,7 @@ pub const Scheduler = struct {
                 self.lock.unlock();
             }
         } else {
+            // serial.print("[SCHED] Idle\n", .{});
             self.lock.unlock();
         }
     }
@@ -126,6 +129,34 @@ pub const Scheduler = struct {
     pub fn yield(self: *Scheduler) void {
         self.schedule();
     }
+
+    /// Blocks the current thread and switches to the next one.
+    /// The thread must be woken up by another thread calling `wake()`.
+    pub fn block(self: *Scheduler) void {
+        const flags = x64.saveAndDisableInterrupts();
+        defer x64.restoreInterrupts(flags);
+
+        if (self.current_thread) |thread| {
+            thread.state = .BLOCKED;
+        }
+        self.schedule();
+    }
+
+    /// Wakes up a thread, adding it to the ready queue.
+    pub fn wake(self: *Scheduler, thread: *process.Thread) void {
+        const flags = x64.saveAndDisableInterrupts();
+        defer x64.restoreInterrupts(flags);
+
+        self.lock.lock();
+        defer self.lock.unlock();
+
+        if (thread.state == .BLOCKED) {
+            thread.state = .READY;
+            const node = self.allocNode();
+            node.data = thread;
+            self.ready_queue.append(node);
+        }
+    }
 };
 
-pub var global_scheduler: Scheduler = undefined;
+pub var instance: Scheduler = undefined;

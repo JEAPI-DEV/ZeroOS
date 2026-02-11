@@ -16,6 +16,11 @@ pub inline fn hang() noreturn {
     }
 }
 
+/// Halts the CPU until the next interrupt.
+pub inline fn hlt() void {
+    asm volatile ("hlt");
+}
+
 /// Enables interrupts.
 pub inline fn sti() void {
     asm volatile ("sti");

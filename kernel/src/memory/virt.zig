@@ -13,6 +13,8 @@ const Flags = u16;
 pub const PRESENT: Flags = 1 << 0;
 pub const WRITABLE: Flags = 1 << 1;
 pub const USER: Flags = 1 << 2;
+pub const PWT: Flags = 1 << 3;
+pub const PCD: Flags = 1 << 4;
 /// Page entry flag to signal that the physical page was automatically allocated.
 const ALLOCATED: Flags = 1 << 9;
 

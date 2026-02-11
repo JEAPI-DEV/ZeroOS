@@ -28,5 +28,5 @@ pub fn handleInterrupt(stack: *@import("../interrupt/isr.zig").InterruptStack) c
     const scheduler = @import("../proc/scheduler.zig");
 
     pic.sendEOI(0);
-    scheduler.global_scheduler.tick();
+    scheduler.instance.tick();
 }

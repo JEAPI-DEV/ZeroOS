@@ -89,6 +89,6 @@ pub fn start() !void {
         }
 
         // Yield to other threads
-        scheduler.global_scheduler.yield();
+        scheduler.instance.yield();
     }
 }

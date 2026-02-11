@@ -53,7 +53,7 @@ pub const Shell = struct {
         while (true) {
             const char = input.getKey();
             if (char == 0) {
-                scheduler.global_scheduler.yield();
+                scheduler.instance.yield();
                 continue;
             }
 
@@ -201,15 +201,15 @@ pub const Shell = struct {
         } else if (std.mem.eql(u8, cmd, "start-ui")) {
             term.print("Starting GUI...\n", .{});
             serial.print("[SHELL] Creating GUI thread...\n", .{});
-            const current_thread = scheduler.global_scheduler.current_thread.?;
-            const gui_thread = current_thread.process.createThread(desktopThread, 16384, heap.allocator) catch |err| {
+            const current_thread = scheduler.instance.current_thread.?;
+            const gui_thread = current_thread.process.createThread(desktopThread, null, 16384, heap.allocator) catch |err| {
                 term.print("Failed to create GUI thread: {s}\n", .{@errorName(err)});
                 return;
             };
             serial.print("[SHELL] Enqueueing GUI thread (ID={})...\n", .{gui_thread.id});
             input.setMode(.GUI);
             term.suppressed = true;
-            scheduler.global_scheduler.enqueue(gui_thread);
+            scheduler.instance.enqueue(gui_thread);
         } else if (std.mem.eql(u8, cmd, "reboot")) {
             term.print("Rebooting...\n", .{});
             // 8042 keyboard controller pulse reset line.
@@ -228,7 +228,7 @@ pub const Shell = struct {
     }
 };
 
-fn desktopThread() void {
+fn desktopThread(_: ?*anyopaque) void {
     serial.print("[GUI] desktopThread entered\n", .{});
     x64.sti();
     desktop.start() catch |err| {

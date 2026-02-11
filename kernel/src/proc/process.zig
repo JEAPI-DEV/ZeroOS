@@ -23,6 +23,9 @@ pub const Thread = struct {
     // Context saved during context switch
     context: Context = .{},
 
+    /// Next thread in a wait queue (Mutex/Condition).
+    next_waiter: ?*Thread = null,
+
     /// Saved register state for context switching.
     pub const Context = struct {
         rsp: u64 = 0,
@@ -49,8 +52,10 @@ pub const Process = struct {
         _ = self;
     }
 
+    extern fn thread_entry_stub() void;
+
     /// Creates a new thread within the process.
-    pub fn createThread(self: *Process, entry: *const fn () void, stack_size: usize, allocator: std.mem.Allocator) !*Thread {
+    pub fn createThread(self: *Process, entry: *const fn (?*anyopaque) void, arg: ?*anyopaque, stack_size: usize, allocator: std.mem.Allocator) !*Thread {
         if (self.thread_count >= self.threads.len) return error.TooManyThreads;
 
         const thread = try allocator.create(Thread);
@@ -75,20 +80,33 @@ pub const Process = struct {
         // Set up the initial stack to look like a saved context.
         var sp = @as([*]u64, @ptrFromInt(thread.stack_pointer));
 
-        // Push a dummy return address (threadExit)
+        // Push RIP (entry point stub)
         sp -= 1;
-        sp[0] = @intFromPtr(&threadExit);
+        sp[0] = @intFromPtr(&thread_entry_stub);
 
-        // Push RIP (entry point)
+        // Push RBP
+        sp -= 1;
+        sp[0] = 0;
+
+        // Push RBX (Thread Function)
         sp -= 1;
         sp[0] = @intFromPtr(entry);
 
-        // Push dummy values for callee-saved registers (r15, r14, r13, r12, rbx, rbp)
-        var j: usize = 0;
-        while (j < 6) : (j += 1) {
-            sp -= 1;
-            sp[0] = 0;
-        }
+        // Push R12 (Argument)
+        sp -= 1;
+        sp[0] = if (arg) |a| @intFromPtr(a) else 0;
+
+        // Push R13 (Exit Function)
+        sp -= 1;
+        sp[0] = @intFromPtr(&threadExit);
+
+        // Push R14
+        sp -= 1;
+        sp[0] = 0;
+
+        // Push R15
+        sp -= 1;
+        sp[0] = 0;
 
         thread.context.rsp = @intFromPtr(sp);
 
@@ -100,6 +118,11 @@ pub const Process = struct {
 
 /// Function that threads "return" to if they exit.
 fn threadExit() noreturn {
+    const scheduler = @import("scheduler.zig");
     const x64 = @import("../cpu/x64.zig");
-    x64.hang();
+    x64.sti(); // Ensure interrupts enabled
+    while (true) {
+        scheduler.instance.yield();
+        x64.hlt();
+    }
 }
