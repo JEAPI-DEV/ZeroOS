@@ -1,7 +1,13 @@
 const std = @import("std");
 
+const vfs = @import("../../fs/vfs.zig");
+
+pub const ShellContext = struct {
+    current_dir: *vfs.VfsNode,
+};
+
 pub const ShellApp = struct {
     name: []const u8,
     description: []const u8,
-    run: *const fn (args: [][]const u8) anyerror!void,
+    run: *const fn (ctx: *ShellContext, args: [][]const u8) anyerror!void,
 };

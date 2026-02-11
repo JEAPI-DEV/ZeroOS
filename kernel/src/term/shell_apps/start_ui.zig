@@ -6,7 +6,9 @@ const input = @import("../../driver/input.zig");
 const heap = @import("../../memory/heap.zig");
 const serial = @import("../../driver/serial.zig");
 const x64 = @import("../../cpu/x64.zig");
-const ShellApp = @import("shell_app.zig").ShellApp;
+const shell_app = @import("shell_app.zig");
+const ShellApp = shell_app.ShellApp;
+const ShellContext = shell_app.ShellContext;
 
 pub const start_ui_app = ShellApp{
     .name = "start-ui",
@@ -14,7 +16,8 @@ pub const start_ui_app = ShellApp{
     .run = run,
 };
 
-fn run(args: [][]const u8) anyerror!void {
+fn run(ctx: *ShellContext, args: [][]const u8) anyerror!void {
+    _ = ctx;
     _ = args;
     term.print("Starting GUI...\n", .{});
     serial.print("[SHELL] Creating GUI thread...\n", .{});

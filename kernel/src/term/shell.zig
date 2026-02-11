@@ -17,12 +17,24 @@ const shell_apps = struct {
     pub const clear = @import("shell_apps/clear.zig").clear_app;
     pub const echo = @import("shell_apps/echo.zig").echo_app;
     pub const ls = @import("shell_apps/ls.zig").ls_app;
-    pub const power = @import("shell_apps/power.zig");
+    pub const cd = @import("shell_apps/cd.zig").cd_app;
+    pub const help = @import("shell_apps/help.zig").help_app;
+    pub const mkdir = @import("shell_apps/mkdir.zig").mkdir_app;
+    pub const touch = @import("shell_apps/touch.zig").touch_app;
+    pub const cat = @import("shell_apps/cat.zig").cat_app;
+    pub const write = @import("shell_apps/write.zig").write_app;
+    pub const rm = @import("shell_apps/rm.zig").rm_app;
+    pub const cp = @import("shell_apps/cp.zig").cp_app;
+    pub const mv = @import("shell_apps/mv.zig").mv_app;
+    pub const pwd = @import("shell_apps/pwd.zig").pwd_app;
+    pub const reboot = @import("shell_apps/reboot.zig").reboot_app;
+    pub const shutdown = @import("shell_apps/shutdown.zig").shutdown_app;
     pub const start_ui = @import("shell_apps/start_ui.zig").start_ui_app;
-    pub const vfs = @import("shell_apps/vfs.zig");
 };
 
-const ShellApp = @import("shell_apps/shell_app.zig").ShellApp;
+const shell_app_mod = @import("shell_apps/shell_app.zig");
+const ShellApp = shell_app_mod.ShellApp;
+const ShellContext = shell_app_mod.ShellContext;
 
 /// Maximum command length.
 const MAX_COMMAND_LEN = 256;
@@ -33,24 +45,34 @@ pub const Shell = struct {
     buffer: [MAX_COMMAND_LEN]u8 = undefined,
     /// Current buffer length.
     len: usize = 0,
+    /// Shell context.
+    ctx: ShellContext,
 
     /// List of registered apps.
     apps: []const ShellApp = &.{
         shell_apps.clear,
         shell_apps.echo,
         shell_apps.ls,
-        shell_apps.power.reboot_app,
-        shell_apps.power.shutdown_app,
+        shell_apps.cd,
+        shell_apps.help,
+        shell_apps.pwd,
+        shell_apps.mkdir,
+        shell_apps.touch,
+        shell_apps.cat,
+        shell_apps.write,
+        shell_apps.rm,
+        shell_apps.cp,
+        shell_apps.mv,
+        shell_apps.reboot,
+        shell_apps.shutdown,
         shell_apps.start_ui,
-        shell_apps.vfs.mkdir_app,
-        shell_apps.vfs.touch_app,
-        shell_apps.vfs.cat_app,
-        shell_apps.vfs.write_app,
     },
 
     /// Initializes the shell.
     pub fn init() Shell {
-        return Shell{};
+        return Shell{
+            .ctx = .{ .current_dir = vfs.getRoot() },
+        };
     }
 
     /// Runs the shell loop.
@@ -68,8 +90,9 @@ pub const Shell = struct {
 
     /// Prints the shell prompt.
     fn prompt(self: *Shell) void {
-        _ = self;
-        term.colorPrint(.green, "Zero> ", .{});
+        term.colorPrint(.green, "Zero:", .{});
+        term.colorPrint(.blue, "{s}", .{self.ctx.current_dir.name});
+        term.colorPrint(.green, "> ", .{});
     }
 
     /// Reads a line of input from the keyboard.
@@ -131,7 +154,7 @@ pub const Shell = struct {
 
         for (self.apps) |app| {
             if (std.mem.eql(u8, app.name, cmd_name)) {
-                app.run(args) catch |err| {
+                app.run(&self.ctx, args) catch |err| {
                     term.print("Error running '{s}': {s}\n", .{ app.name, @errorName(err) });
                 };
                 return;

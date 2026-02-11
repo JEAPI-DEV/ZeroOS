@@ -1,7 +1,9 @@
 const std = @import("std");
 const term = @import("../terminal.zig");
 const vfs = @import("../../fs/vfs.zig");
-const ShellApp = @import("shell_app.zig").ShellApp;
+const shell_app = @import("shell_app.zig");
+const ShellApp = shell_app.ShellApp;
+const ShellContext = shell_app.ShellContext;
 
 pub const ls_app = ShellApp{
     .name = "ls",
@@ -9,8 +11,8 @@ pub const ls_app = ShellApp{
     .run = run,
 };
 
-fn run(args: [][]const u8) anyerror!void {
-    var path: []const u8 = "/";
+fn run(ctx: *ShellContext, args: [][]const u8) anyerror!void {
+    var path: []const u8 = ".";
     if (args.len > 0) {
         path = args[0];
         // Strip quotes
@@ -19,7 +21,7 @@ fn run(args: [][]const u8) anyerror!void {
         }
     }
 
-    const node = try vfs.lookup(path);
+    const node = try vfs.lookup(path, ctx.current_dir);
     if (node.node_type != .directory) {
         term.print("{s}\n", .{node.name});
         return;

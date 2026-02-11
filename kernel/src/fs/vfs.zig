@@ -15,6 +15,7 @@ pub const VfsNode = struct {
     vtable: *const VTable,
     data: ?*anyopaque = null,
     node_type: NodeType,
+    parent: ?*VfsNode = null,
 
     pub const VTable = struct {
         open: *const fn (node: *VfsNode, flags: u32) anyerror!*FileHandle,
@@ -23,6 +24,8 @@ pub const VfsNode = struct {
         readdir: *const fn (node: *VfsNode, index: usize) anyerror!?*VfsNode,
         mkdir: *const fn (node: *VfsNode, name: []const u8) anyerror!*VfsNode,
         create: *const fn (node: *VfsNode, name: []const u8) anyerror!*VfsNode,
+        remove: *const fn (node: *VfsNode, name: []const u8) anyerror!void,
+        rename: *const fn (node: *VfsNode, old_name: []const u8, new_name: []const u8) anyerror!void,
     };
 
     pub fn open(self: *VfsNode, flags: u32) anyerror!*FileHandle {
@@ -47,6 +50,14 @@ pub const VfsNode = struct {
 
     pub fn create(self: *VfsNode, name: []const u8) anyerror!*VfsNode {
         return self.vtable.create(self, name);
+    }
+
+    pub fn remove(self: *VfsNode, name: []const u8) anyerror!void {
+        return self.vtable.remove(self, name);
+    }
+
+    pub fn rename(self: *VfsNode, old_name: []const u8, new_name: []const u8) anyerror!void {
+        return self.vtable.rename(self, old_name, new_name);
     }
 };
 
@@ -83,15 +94,23 @@ pub fn getRoot() *VfsNode {
     return root_fs.?.root;
 }
 
-/// Simple path resolution (only absolute paths for now)
-pub fn lookup(path: []const u8) anyerror!*VfsNode {
+/// Simple path resolution
+pub fn lookup(path: []const u8, base_node: ?*VfsNode) anyerror!*VfsNode {
     if (path.len == 0) return error.InvalidPath;
 
-    var current = getRoot();
+    var current = if (path[0] == '/') getRoot() else (base_node orelse getRoot());
     const start_index: usize = if (path[0] == '/') 1 else 0;
     var it = std.mem.tokenizeScalar(u8, path[start_index..], '/');
 
     while (it.next()) |component| {
+        if (std.mem.eql(u8, component, ".")) continue;
+        if (std.mem.eql(u8, component, "..")) {
+            if (current.parent) |p| {
+                current = p;
+            }
+            continue;
+        }
+
         if (current.node_type != .directory) return error.NotADirectory;
 
         var i: usize = 0;
