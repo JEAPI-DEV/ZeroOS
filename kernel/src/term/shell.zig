@@ -12,6 +12,18 @@ const proc = @import("../proc/process.zig");
 const scheduler = @import("../proc/scheduler.zig");
 const input = @import("../driver/input.zig");
 
+// Shell Apps
+const shell_apps = struct {
+    pub const clear = @import("shell_apps/clear.zig").clear_app;
+    pub const echo = @import("shell_apps/echo.zig").echo_app;
+    pub const ls = @import("shell_apps/ls.zig").ls_app;
+    pub const power = @import("shell_apps/power.zig");
+    pub const start_ui = @import("shell_apps/start_ui.zig").start_ui_app;
+    pub const vfs = @import("shell_apps/vfs.zig");
+};
+
+const ShellApp = @import("shell_apps/shell_app.zig").ShellApp;
+
 /// Maximum command length.
 const MAX_COMMAND_LEN = 256;
 
@@ -21,6 +33,20 @@ pub const Shell = struct {
     buffer: [MAX_COMMAND_LEN]u8 = undefined,
     /// Current buffer length.
     len: usize = 0,
+
+    /// List of registered apps.
+    apps: []const ShellApp = &.{
+        shell_apps.clear,
+        shell_apps.echo,
+        shell_apps.ls,
+        shell_apps.power.reboot_app,
+        shell_apps.power.shutdown_app,
+        shell_apps.start_ui,
+        shell_apps.vfs.mkdir_app,
+        shell_apps.vfs.touch_app,
+        shell_apps.vfs.cat_app,
+        shell_apps.vfs.write_app,
+    },
 
     /// Initializes the shell.
     pub fn init() Shell {
@@ -81,157 +107,37 @@ pub const Shell = struct {
 
         const cmd_line = self.buffer[0..self.len];
         var iter = std.mem.tokenizeScalar(u8, cmd_line, ' ');
-        const cmd = iter.next() orelse return;
+        const cmd_name = iter.next() orelse return;
 
-        if (std.mem.eql(u8, cmd, "help")) {
+        if (std.mem.eql(u8, cmd_name, "help")) {
             term.print("Available commands:\n", .{});
             term.print("  help      - Show this help message\n", .{});
-            term.print("  clear     - Clear the screen\n", .{});
-            term.print("  echo      - Print arguments\n", .{});
-            term.print("  ls        - List directory contents\n", .{});
-            term.print("  mkdir     - Create a directory\n", .{});
-            term.print("  touch     - Create an empty file\n", .{});
-            term.print("  cat       - Read file contents\n", .{});
-            term.print("  write     - Write text to a file\n", .{});
-            term.print("  start-ui  - Start the graphical user interface\n", .{});
-            term.print("  reboot    - Reboot the system\n", .{});
-            term.print("  shutdown  - Shutdown the system\n", .{});
-        } else if (std.mem.eql(u8, cmd, "clear")) {
-            term.clear();
-        } else if (std.mem.eql(u8, cmd, "echo")) {
-            const rest = iter.rest();
-            term.print("{s}\n", .{rest});
-        } else if (std.mem.eql(u8, cmd, "ls")) {
-            var path = iter.next() orelse "/";
-            // Strip quotes
-            if (path.len >= 2 and ((path[0] == '\'' and path[path.len - 1] == '\'') or (path[0] == '"' and path[path.len - 1] == '"'))) {
-                path = path[1 .. path.len - 1];
+            for (self.apps) |app| {
+                term.print("  {s: <9} - {s}\n", .{ app.name, app.description });
             }
-            const node = vfs.lookup(path) catch |err| {
-                term.print("ls: {s}: {s}\n", .{ path, @errorName(err) });
-                return;
-            };
-            if (node.node_type != .directory) {
-                term.print("{s}\n", .{node.name});
-                return;
-            }
-            var i: usize = 0;
-            while (vfs.VfsNode.readdir(node, i) catch null) |child| : (i += 1) {
-                if (child.node_type == .directory) {
-                    term.colorPrint(.blue, "{s}/  ", .{child.name});
-                } else {
-                    term.print("{s}  ", .{child.name});
-                }
-            }
-            term.print("\n", .{});
-        } else if (std.mem.eql(u8, cmd, "mkdir")) {
-            var path = iter.next() orelse {
-                term.print("Usage: mkdir <path>\n", .{});
-                return;
-            };
-            // Strip quotes
-            if (path.len >= 2 and ((path[0] == '\'' and path[path.len - 1] == '\'') or (path[0] == '"' and path[path.len - 1] == '"'))) {
-                path = path[1 .. path.len - 1];
-            }
-            // For simplicity, we only support creating in current dir (root for now)
-            const root = vfs.getRoot();
-            _ = vfs.VfsNode.mkdir(root, path) catch |err| {
-                term.print("mkdir: {s}: {s}\n", .{ path, @errorName(err) });
-                return;
-            };
-        } else if (std.mem.eql(u8, cmd, "touch")) {
-            var path = iter.next() orelse {
-                term.print("Usage: touch <path>\n", .{});
-                return;
-            };
-            // Strip quotes
-            if (path.len >= 2 and ((path[0] == '\'' and path[path.len - 1] == '\'') or (path[0] == '"' and path[path.len - 1] == '"'))) {
-                path = path[1 .. path.len - 1];
-            }
-            const root = vfs.getRoot();
-            _ = vfs.VfsNode.create(root, path) catch |err| {
-                term.print("touch: {s}: {s}\n", .{ path, @errorName(err) });
-                return;
-            };
-        } else if (std.mem.eql(u8, cmd, "cat")) {
-            var path = iter.next() orelse {
-                term.print("Usage: cat <path>\n", .{});
-                return;
-            };
-            // Strip quotes
-            if (path.len >= 2 and ((path[0] == '\'' and path[path.len - 1] == '\'') or (path[0] == '"' and path[path.len - 1] == '"'))) {
-                path = path[1 .. path.len - 1];
-            }
-            const node = vfs.lookup(path) catch |err| {
-                term.print("cat: {s}: {s}\n", .{ path, @errorName(err) });
-                return;
-            };
-            if (node.node_type != .file) {
-                term.print("cat: {s}: Not a file\n", .{path});
-                return;
-            }
-            var buf: [1024]u8 = undefined;
-            const bytes_read = vfs.VfsNode.read(node, 0, &buf) catch |err| {
-                term.print("cat: {s}: {s}\n", .{ path, @errorName(err) });
-                return;
-            };
-            term.print("{s}\n", .{buf[0..bytes_read]});
-        } else if (std.mem.eql(u8, cmd, "write")) {
-            var path = iter.next() orelse {
-                term.print("Usage: write <path> <text>\n", .{});
-                return;
-            };
-            // Strip quotes
-            if (path.len >= 2 and ((path[0] == '\'' and path[path.len - 1] == '\'') or (path[0] == '"' and path[path.len - 1] == '"'))) {
-                path = path[1 .. path.len - 1];
-            }
-            const text = std.mem.trim(u8, iter.rest(), " ");
-            const node = vfs.lookup(path) catch |err| {
-                term.print("write: {s}: {s}\n", .{ path, @errorName(err) });
-                return;
-            };
-            if (node.node_type != .file) {
-                term.print("write: {s}: Not a file\n", .{path});
-                return;
-            }
-            _ = vfs.VfsNode.write(node, 0, text) catch |err| {
-                term.print("write: {s}: {s}\n", .{ path, @errorName(err) });
-                return;
-            };
-        } else if (std.mem.eql(u8, cmd, "start-ui")) {
-            term.print("Starting GUI...\n", .{});
-            serial.print("[SHELL] Creating GUI thread...\n", .{});
-            const current_thread = scheduler.instance.current_thread.?;
-            const gui_thread = current_thread.process.createThread(desktopThread, null, 16384, heap.allocator) catch |err| {
-                term.print("Failed to create GUI thread: {s}\n", .{@errorName(err)});
-                return;
-            };
-            serial.print("[SHELL] Enqueueing GUI thread (ID={})...\n", .{gui_thread.id});
-            input.setMode(.GUI);
-            term.suppressed = true;
-            scheduler.instance.enqueue(gui_thread);
-        } else if (std.mem.eql(u8, cmd, "reboot")) {
-            term.print("Rebooting...\n", .{});
-            // 8042 keyboard controller pulse reset line.
-            x64.outb(0x64, 0xFE);
-            x64.hang();
-        } else if (std.mem.eql(u8, cmd, "shutdown")) {
-            term.print("Shutting down...\n", .{});
-            // QEMU shutdown hack (for newer QEMU).
-            x64.outw(0x604, 0x2000);
-            // Bochs/older QEMU shutdown hack.
-            x64.outw(0xB004, 0x2000);
-            x64.hang();
-        } else {
-            term.print("Unknown command: {s}\n", .{cmd});
+            return;
         }
+
+        // Collect arguments
+        var args_buf: [16][]const u8 = undefined;
+        var args_len: usize = 0;
+        while (iter.next()) |arg| {
+            if (args_len < args_buf.len) {
+                args_buf[args_len] = arg;
+                args_len += 1;
+            }
+        }
+        const args = args_buf[0..args_len];
+
+        for (self.apps) |app| {
+            if (std.mem.eql(u8, app.name, cmd_name)) {
+                app.run(args) catch |err| {
+                    term.print("Error running '{s}': {s}\n", .{ app.name, @errorName(err) });
+                };
+                return;
+            }
+        }
+
+        term.print("Unknown command: {s}\n", .{cmd_name});
     }
 };
-
-fn desktopThread(_: ?*anyopaque) void {
-    serial.print("[GUI] desktopThread entered\n", .{});
-    x64.sti();
-    desktop.start() catch |err| {
-        serial.print("[GUI] Desktop failed: {s}\n", .{@errorName(err)});
-    };
-}

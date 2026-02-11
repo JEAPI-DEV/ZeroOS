@@ -10,6 +10,19 @@ const scheduler = @import("../proc/scheduler.zig");
 const taskbar = @import("taskbar.zig");
 const widget = @import("widget.zig");
 
+// Desktop Apps
+const desktop_apps = struct {
+    pub const terminal = @import("desktop_apps/terminal.zig").terminal_app;
+    pub const calculator = @import("desktop_apps/calculator.zig").calculator_app;
+};
+
+const DesktopApp = @import("desktop_apps/desktop_app.zig").DesktopApp;
+
+const apps = [_]DesktopApp{
+    desktop_apps.terminal,
+    desktop_apps.calculator,
+};
+
 pub fn start() !void {
     serial.print("[GUI] Initializing GFX...\n", .{});
     try gfx.initialize(heap.allocator);
@@ -17,34 +30,14 @@ pub fn start() !void {
     wm.initialize(heap.allocator);
     taskbar.initialize(heap.allocator);
 
-    // Create some example windows
-    const term_win = try wm.global_wm.createWindow("Terminal", 50, 50, 400, 300);
-    try term_win.addWidget(.{
-        .widget_type = .label,
-        .x = 10,
-        .y = 10,
-        .width = 100,
-        .height = 20,
-        .data = .{ .label = .{ .text = "Welcome to Zen OS!", .color = 0x000000 } },
-    });
-    try term_win.addWidget(.{
-        .widget_type = .text_box,
-        .x = 10,
-        .y = 40,
-        .width = 300,
-        .height = 30,
-        .data = .{ .text_box = .{} },
-    });
-
-    const calc_win = try wm.global_wm.createWindow("Calculator", 500, 100, 200, 250);
-    try calc_win.addWidget(.{
-        .widget_type = .button,
-        .x = 50,
-        .y = 50,
-        .width = 100,
-        .height = 40,
-        .data = .{ .button = .{ .text = "Click Me!", .on_click = null } },
-    });
+    // Create applications
+    for (apps, 0..) |app, i| {
+        const x: usize = 50 + @as(usize, @intCast(i)) * 100;
+        const y: usize = 50 + @as(usize, @intCast(i)) * 50;
+        // Default sizes, apps can adjust or we can add size to DesktopApp
+        const win = try wm.global_wm.createWindow(app.name, x, y, 400, 300);
+        try app.setup(win);
+    }
 
     // Main GUI Loop
     while (true) {

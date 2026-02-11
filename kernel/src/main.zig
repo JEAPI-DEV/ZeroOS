@@ -23,7 +23,7 @@ const isr = @import("./interrupt/isr.zig");
 const vfs = @import("./fs/vfs.zig");
 const ramfs = @import("./fs/ramfs.zig");
 const pci = @import("./driver/pci.zig");
-const libc = @import("./libc/libc.zig");
+// const libc = @import("./libc/libc.zig");
 const mutex = @import("./sync/mutex.zig");
 const condition = @import("./sync/condition.zig");
 
