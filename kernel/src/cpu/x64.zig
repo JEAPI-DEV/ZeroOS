@@ -45,8 +45,7 @@ pub inline fn restoreInterrupts(rflags: u64) void {
         \\popfq
         :
         : [rflags] "r" (rflags),
-        : .{ .flags = true }
-    );
+        : .{ .flags = true });
 }
 
 /// Loads a new Interrupt Descriptor Table.
@@ -176,6 +175,33 @@ pub inline fn outw(port: u16, value: u16) void {
 pub inline fn inb(port: u16) u8 {
     return asm volatile ("inb %[port], %[value]"
         : [value] "={al}" (-> u8),
+        : [port] "{dx}" (port),
+    );
+}
+
+/// Writes a double word (32 bits) to the specified port.
+///
+/// Parameters:
+///   port:  The port to write to.
+///   value: The value to write.
+pub inline fn outl(port: u16, value: u32) void {
+    asm volatile ("outl %[value], %[port]"
+        :
+        : [value] "{eax}" (value),
+          [port] "{dx}" (port),
+    );
+}
+
+/// Reads a double word (32 bits) from the specified port.
+///
+/// Parameters:
+///   port: The port to read from.
+///
+/// Returns:
+///   The value read from the port.
+pub inline fn inl(port: u16) u32 {
+    return asm volatile ("inl %[port], %[value]"
+        : [value] "={eax}" (-> u32),
         : [port] "{dx}" (port),
     );
 }

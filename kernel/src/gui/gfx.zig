@@ -6,24 +6,54 @@ const font = @import("../term/font.zig");
 
 pub const Color = fb.RgbColor;
 
+pub const Rect = struct {
+    x: usize,
+    y: usize,
+    w: usize,
+    h: usize,
+};
+
 pub const Canvas = struct {
     width: usize,
     height: usize,
     buffer: []volatile Color,
+    clip_rect: ?Rect = null,
 
     pub fn putPixel(self: *Canvas, x: usize, y: usize, color: Color) void {
         if (x >= self.width or y >= self.height) return;
+        if (self.clip_rect) |cr| {
+            if (x < cr.x or x >= cr.x + cr.w or y < cr.y or y >= cr.y + cr.h) return;
+        }
         self.buffer[y * self.width + x] = color;
     }
 
     pub fn fillRect(self: *Canvas, x: usize, y: usize, w: usize, h: usize, color: Color) void {
+        var rx = x;
+        var ry = y;
+        var rw = w;
+        var rh = h;
+
+        if (self.clip_rect) |cr| {
+            const min_x = @max(rx, cr.x);
+            const min_y = @max(ry, cr.y);
+            const max_x = @min(rx + rw, cr.x + cr.w);
+            const max_y = @min(ry + rh, cr.y + cr.h);
+
+            if (min_x >= max_x or min_y >= max_y) return;
+
+            rx = min_x;
+            ry = min_y;
+            rw = max_x - min_x;
+            rh = max_y - min_y;
+        }
+
         var dy: usize = 0;
-        while (dy < h) : (dy += 1) {
-            if (y + dy >= self.height) break;
+        while (dy < rh) : (dy += 1) {
+            if (ry + dy >= self.height) break;
             var dx: usize = 0;
-            while (dx < w) : (dx += 1) {
-                if (x + dx >= self.width) break;
-                self.buffer[(y + dy) * self.width + (x + dx)] = color;
+            while (dx < rw) : (dx += 1) {
+                if (rx + dx >= self.width) break;
+                self.buffer[(ry + dy) * self.width + (rx + dx)] = color;
             }
         }
     }
@@ -93,5 +123,23 @@ pub fn swap() void {
     var i: usize = 0;
     while (i < size) : (i += 1) {
         front_ptr[i] = back_ptr[i];
+    }
+}
+
+pub fn swapRect(x: usize, y: usize, w: usize, h: usize) void {
+    const fb_ptr: [*]volatile u32 = @ptrCast(@alignCast(fb.framebuffer_request.response.?.framebuffers()[0].address));
+    const back_ptr: [*]const u32 = back_buffer.ptr;
+    const stride = fb.width;
+
+    var cur_y = y;
+    const end_y = y + h;
+    while (cur_y < end_y) : (cur_y += 1) {
+        if (cur_y >= fb.height) break;
+
+        const offset = cur_y * stride + x;
+        const len = if (x + w > fb.width) fb.width - x else w;
+        if (len == 0) continue;
+
+        @memcpy(@as([*]u32, @ptrCast(@volatileCast(fb_ptr))) + offset, back_ptr[offset .. offset + len]);
     }
 }

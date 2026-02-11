@@ -64,25 +64,29 @@ pub fn start() !void {
             }
         }
 
-        wm.global_wm.composite(&gfx.screen_canvas);
-        taskbar.global_taskbar.draw(&gfx.screen_canvas);
+        // Invalidate taskbar area every frame to ensure clock updates are drawn
+        // Optimization: Taskbar could track its own dirty state, but this is small enough.
+        wm.global_wm.invalidateRect(0, gfx.screen_canvas.height - taskbar.TASKBAR_HEIGHT, gfx.screen_canvas.width, taskbar.TASKBAR_HEIGHT);
 
-        // Handle keyboard input for widgets
+        const dirty_rect = wm.global_wm.composite(&gfx.screen_canvas);
+        taskbar.global_taskbar.draw(&gfx.screen_canvas);
+        wm.global_wm.drawMouse(&gfx.screen_canvas);
+
+        if (dirty_rect) |r| {
+            gfx.swapRect(r.x, r.y, r.w, r.h);
+        }
         const key = input.getGuiKey();
         if (key != 0) {
             if (wm.global_wm.windows.items.len > 0) {
                 const active_win = wm.global_wm.windows.items[wm.global_wm.windows.items.len - 1];
                 for (active_win.widgets.items) |*w| {
                     if (w.handleKey(key)) {
-                        wm.global_wm.dirty = true;
+                        wm.global_wm.invalidateRect(active_win.x + w.x, active_win.y + w.y, w.width, w.height);
                         break;
                     }
                 }
             }
         }
-
-        wm.global_wm.drawMouse(&gfx.screen_canvas);
-        gfx.swap();
 
         // Yield to other threads
         scheduler.global_scheduler.yield();

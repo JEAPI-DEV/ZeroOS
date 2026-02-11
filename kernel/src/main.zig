@@ -22,6 +22,7 @@ const pit = @import("./driver/pit.zig");
 const isr = @import("./interrupt/isr.zig");
 const vfs = @import("./fs/vfs.zig");
 const ramfs = @import("./fs/ramfs.zig");
+const pci = @import("./driver/pci.zig");
 
 const MEGABYTE = phys.MEGABYTE;
 
@@ -34,8 +35,11 @@ pub export var base_revision: limine.BaseRevision linksection(".limine_requests"
 };
 
 /// Kernel's global panic handler.
-pub fn panic(msg: []const u8, _: ?*std.builtin.StackTrace, _: ?usize) noreturn {
+pub fn panic(msg: []const u8, _: ?*std.builtin.StackTrace, ret_addr: ?usize) noreturn {
     serial.print("\n!!! KERNEL PANIC !!!\n{s}\n", .{msg});
+    if (ret_addr) |addr| {
+        serial.print("Return Address: 0x{x}\n", .{addr});
+    }
     term.panic("{s}", .{msg});
 }
 
@@ -77,6 +81,7 @@ export fn _start() callconv(.c) noreturn {
     pic.unmask(2);
 
     driver.DriverManager.register(ps2.ps2_driver);
+    driver.DriverManager.register(pci.pci_driver);
     driver.DriverManager.initialize();
     ps2.initMouse();
 

@@ -5,6 +5,7 @@ const process = @import("process.zig");
 const spinlock = @import("../sync/spinlock.zig");
 const x64 = @import("../cpu/x64.zig");
 const serial = @import("../driver/serial.zig");
+const heap = @import("../memory/heap.zig");
 
 extern fn switchContext(old: *process.Thread.Context, new: *process.Thread.Context) void;
 
@@ -46,40 +47,29 @@ pub const Scheduler = struct {
     current_thread: ?*process.Thread = null,
     ready_queue: ThreadQueue = .{},
     lock: spinlock.Spinlock = .{},
-
-    // Static pool of nodes to avoid heap allocations during scheduling.
-    nodes: [64]ThreadQueue.Node = undefined,
+    thread_count: usize = 0,
 
     pub fn init() Scheduler {
-        var self = Scheduler{};
-        for (&self.nodes) |*node| {
-            node.* = .{
-                .data = undefined,
-                .in_use = false,
-            };
-        }
-        return self;
+        return Scheduler{};
     }
 
     fn allocNode(self: *Scheduler) *ThreadQueue.Node {
-        for (&self.nodes) |*node| {
-            if (!node.in_use) {
-                node.in_use = true;
-                return node;
-            }
-        }
-        @panic("Scheduler out of nodes");
+        _ = self;
+        return heap.allocator.create(ThreadQueue.Node) catch @panic("Scheduler out of memory");
     }
 
     fn freeNode(self: *Scheduler, node: *ThreadQueue.Node) void {
         _ = self;
-        node.in_use = false;
+        heap.allocator.destroy(node);
     }
 
     /// Adds a thread to the ready queue.
     pub fn enqueue(self: *Scheduler, thread: *process.Thread) void {
         self.lock.lock();
         defer self.lock.unlock();
+
+        self.thread_count += 1;
+        serial.print("[SCHED] Enqueue thread {} (Total: {})\n", .{ thread.id, self.thread_count });
 
         thread.state = .READY;
         const node = self.allocNode();

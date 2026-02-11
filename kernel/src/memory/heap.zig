@@ -1,6 +1,7 @@
 const std = @import("std");
 const term = @import("../term/terminal.zig");
 const serial = @import("../driver/serial.zig");
+const x64 = @import("../cpu/x64.zig");
 
 const assert = @import("std").debug.assert;
 const GIGABYTE = @import("./phys.zig").GIGABYTE;
@@ -186,6 +187,7 @@ const Block = struct {
     /// Tries to merge a block with a free one on the left.
     fn tryMergeLeft(self: *Block) void {
         const prev = self.prev orelse return;
+        if (!prev.is_free) return;
         if (!self.is_free) return;
         tryMergeRight(prev);
     }
@@ -216,6 +218,9 @@ fn alloc(context: *anyopaque, size: usize, alignment: std.mem.Alignment, ret_add
     _ = context;
     _ = alignment;
     _ = ret_addr;
+
+    const flags = x64.saveAndDisableInterrupts();
+    defer x64.restoreInterrupts(flags);
 
     // Ensure 8-byte alignment for all allocations.
     const adjusted_size = std.mem.alignForward(usize, size, 8);
@@ -261,6 +266,9 @@ fn free(context: *anyopaque, memory: []u8, alignment: std.mem.Alignment, ret_add
     _ = context;
     _ = alignment;
     _ = ret_addr;
+
+    const flags = x64.saveAndDisableInterrupts();
+    defer x64.restoreInterrupts(flags);
 
     const block = Block.fromData(memory.ptr);
     block.free(); // Reinsert the block into the free list.
