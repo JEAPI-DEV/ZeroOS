@@ -13,12 +13,14 @@ const widget = @import("widget.zig");
 // Desktop Apps
 const desktop_apps = struct {
     pub const terminal = @import("desktop_apps/terminal.zig").terminal_app;
+    pub const welcome = @import("desktop_apps/welcome.zig").welcome_app;
     pub const calculator = @import("desktop_apps/calculator.zig").calculator_app;
 };
 
 const DesktopApp = @import("desktop_apps/desktop_app.zig").DesktopApp;
 
 const apps = [_]DesktopApp{
+    desktop_apps.welcome,
     desktop_apps.terminal,
     desktop_apps.calculator,
 };
