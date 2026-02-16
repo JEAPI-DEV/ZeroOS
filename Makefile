@@ -29,6 +29,7 @@ $(ISO_FILE): boot/limine kernel
 
 	cp boot/limine.conf $(ISO_DIR)  # Copy the Limine bootloader configuration file.
 	cp $(KERNEL_BIN) $(ISO_DIR)     # Copy the kernel binary.
+	./tools/generate_symbols.sh $(KERNEL_BIN) $(ISO_DIR)/kernel.sym
 
 	cp boot/limine/limine-bios.sys    \
 	   boot/limine/limine-bios-cd.bin \
@@ -49,13 +50,17 @@ $(ISO_FILE): boot/limine kernel
 
 # Run the ISO image in QEMU.
 .PHONY: run
-run: $(ISO_FILE)
-	qemu-system-x86_64 -M q35 -m 128M -cdrom $(ISO_FILE) -boot d -serial stdio -device virtio-gpu-pci
+run: $(ISO_FILE) disk.img
+	qemu-system-x86_64 -M q35 -m 128M -cdrom $(ISO_FILE) -boot d -serial stdio -device virtio-gpu-pci -drive file=disk.img,format=raw,if=virtio
+
+# Create a blank disk image (32MB)
+disk.img:
+	dd if=/dev/zero of=disk.img bs=1M count=32
 
 # Clean up build artifacts.
 .PHONY: clean
 clean:
-	rm -rf $(ISO_DIR) $(ISO_FILE)
+	rm -rf $(ISO_DIR) $(ISO_FILE) disk.img
 	rm -rf kernel/.zig-cache kernel/zig-out
 
 # Clean up everything.

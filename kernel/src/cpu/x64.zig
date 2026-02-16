@@ -21,6 +21,11 @@ pub inline fn hlt() void {
     asm volatile ("hlt");
 }
 
+/// Pause the CPU for a short period (used in spinloops).
+pub inline fn pause() void {
+    asm volatile ("pause");
+}
+
 /// Enables interrupts.
 pub inline fn sti() void {
     asm volatile ("sti");
@@ -215,4 +220,16 @@ pub inline fn inl(port: u16) u32 {
 /// Useful for I/O operations that require a small delay.
 pub inline fn ioWait() void {
     outb(0x80, 0);
+}
+
+/// Reads from the RBP register.
+///
+/// Returns:
+///   Value of the RBP register.
+pub inline fn readRbp() u64 {
+    var value: u64 = undefined;
+    asm volatile ("mov %rbp, %[value]"
+        : [value] "=r" (value),
+    );
+    return value;
 }

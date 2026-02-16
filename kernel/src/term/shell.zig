@@ -29,15 +29,37 @@ const shell_apps = struct {
     pub const pwd = @import("shell_apps/pwd.zig").pwd_app;
     pub const reboot = @import("shell_apps/reboot.zig").reboot_app;
     pub const shutdown = @import("shell_apps/shutdown.zig").shutdown_app;
+    pub const sync = @import("shell_apps/sync.zig").sync_app;
     pub const start_ui = @import("shell_apps/start_ui.zig").start_ui_app;
 };
 
 const shell_app_mod = @import("shell_apps/shell_app.zig");
 const ShellApp = shell_app_mod.ShellApp;
 const ShellContext = shell_app_mod.ShellContext;
+const ramfs = @import("../fs/ramfs.zig");
 
 /// Maximum command length.
 const MAX_COMMAND_LEN = 256;
+
+const all_apps = [_]ShellApp{
+    shell_apps.clear,
+    shell_apps.echo,
+    shell_apps.ls,
+    shell_apps.cd,
+    shell_apps.help,
+    shell_apps.pwd,
+    shell_apps.mkdir,
+    shell_apps.touch,
+    shell_apps.cat,
+    shell_apps.write,
+    shell_apps.rm,
+    shell_apps.cp,
+    shell_apps.mv,
+    shell_apps.reboot,
+    shell_apps.shutdown,
+    shell_apps.sync,
+    shell_apps.start_ui,
+};
 
 /// The shell structure.
 pub const Shell = struct {
@@ -49,29 +71,21 @@ pub const Shell = struct {
     ctx: ShellContext,
 
     /// List of registered apps.
-    apps: []const ShellApp = &.{
-        shell_apps.clear,
-        shell_apps.echo,
-        shell_apps.ls,
-        shell_apps.cd,
-        shell_apps.help,
-        shell_apps.pwd,
-        shell_apps.mkdir,
-        shell_apps.touch,
-        shell_apps.cat,
-        shell_apps.write,
-        shell_apps.rm,
-        shell_apps.cp,
-        shell_apps.mv,
-        shell_apps.reboot,
-        shell_apps.shutdown,
-        shell_apps.start_ui,
-    },
+    apps: []const ShellApp = &all_apps,
 
     /// Initializes the shell.
     pub fn init() Shell {
+        // Try to load persistence
+        serial.print("[SHELL] Loading filesystem... (DISABLED)\n", .{});
+        // ramfs.loadFromDisk() catch |err| {
+        //     serial.print("[SHELL] Failed to load filesystem (or empty): {s}\n", .{@errorName(err)});
+        // };
+
         return Shell{
-            .ctx = .{ .current_dir = vfs.getRoot() },
+            .ctx = .{
+                .current_dir = vfs.getRoot(),
+                .apps = &all_apps,
+            },
         };
     }
 
@@ -131,15 +145,6 @@ pub const Shell = struct {
         const cmd_line = self.buffer[0..self.len];
         var iter = std.mem.tokenizeScalar(u8, cmd_line, ' ');
         const cmd_name = iter.next() orelse return;
-
-        if (std.mem.eql(u8, cmd_name, "help")) {
-            term.print("Available commands:\n", .{});
-            term.print("  help      - Show this help message\n", .{});
-            for (self.apps) |app| {
-                term.print("  {s: <9} - {s}\n", .{ app.name, app.description });
-            }
-            return;
-        }
 
         // Collect arguments
         var args_buf: [16][]const u8 = undefined;

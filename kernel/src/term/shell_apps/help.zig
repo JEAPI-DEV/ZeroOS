@@ -11,11 +11,10 @@ pub const help_app = ShellApp{
 };
 
 fn run(ctx: *ShellContext, args: [][]const u8) anyerror!void {
-    _ = ctx;
     _ = args;
-    // Note: The shell handles the actual 'help' rendering in the loop for now
-    // to avoid circular dependencies or needing to pass the shell handle.
-    // However, if we want it to be a real app, we might need a way to list apps.
-    // For now, the shell's built-in help is preferred.
-    term.print("Type 'help' for a list of commands.\n", .{});
+    term.print("Available commands:\n", .{});
+    term.print("  help      - Show this help message\n", .{});
+    for (ctx.apps) |app| {
+        term.print("  {s: <9} - {s}\n", .{ app.name, app.description });
+    }
 }

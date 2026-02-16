@@ -13,6 +13,9 @@ pub const shutdown_app = ShellApp{
 fn run(ctx: *ShellContext, args: [][]const u8) anyerror!void {
     _ = ctx;
     _ = args;
+    term.print("Syncing...\n", .{});
+    term.print("Syncing... (DISABLED)\n", .{});
+    // @import("../../fs/ramfs.zig").saveToDisk() catch {};
     term.print("Shutting down...\n", .{});
     x64.outw(0x604, 0x2000);
     x64.outw(0xB004, 0x2000);

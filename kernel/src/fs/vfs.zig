@@ -25,7 +25,7 @@ pub const VfsNode = struct {
         mkdir: *const fn (node: *VfsNode, name: []const u8) anyerror!*VfsNode,
         create: *const fn (node: *VfsNode, name: []const u8) anyerror!*VfsNode,
         remove: *const fn (node: *VfsNode, name: []const u8) anyerror!void,
-        rename: *const fn (node: *VfsNode, old_name: []const u8, new_name: []const u8) anyerror!void,
+        rename: *const fn (old_parent: *VfsNode, old_name: []const u8, new_parent: *VfsNode, new_name: []const u8) anyerror!void,
     };
 
     pub fn open(self: *VfsNode, flags: u32) anyerror!*FileHandle {
@@ -56,8 +56,8 @@ pub const VfsNode = struct {
         return self.vtable.remove(self, name);
     }
 
-    pub fn rename(self: *VfsNode, old_name: []const u8, new_name: []const u8) anyerror!void {
-        return self.vtable.rename(self, old_name, new_name);
+    pub fn rename(self: *VfsNode, old_name: []const u8, new_parent: *VfsNode, new_name: []const u8) anyerror!void {
+        return self.vtable.rename(self, old_name, new_parent, new_name);
     }
 };
 
@@ -84,7 +84,7 @@ pub const FileSystem = struct {
     root: *VfsNode,
 };
 
-var root_fs: ?*FileSystem = null;
+pub var root_fs: ?*FileSystem = null;
 
 pub fn mount(fs: *FileSystem) void {
     root_fs = fs;

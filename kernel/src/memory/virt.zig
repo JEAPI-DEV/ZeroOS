@@ -78,7 +78,7 @@ pub inline fn higherHalf(address: usize) usize {
 ///   Physical address of the new PML4.
 pub fn createAddressSpace() PageTable {
     // Allocate and initialize space for a new PML4.
-    const phys_pml4 = phys.allocate();
+    const phys_pml4 = phys.allocateContiguous(1, 1);
     const virt_pml4: PageTable = @ptrFromInt(higherHalf(phys_pml4));
     clearPageTable(virt_pml4);
 
@@ -113,18 +113,18 @@ pub fn mapPage(virtual_address: usize, physical_address: usize, flags: Flags) vo
     // Prepare higher level paging structures if necessary.
     // We use permissive flags, and set the restrictions in the PT entry.
     if (pml4_entry.* == 0) {
-        pml4_entry.* = phys.allocate() | PRESENT | WRITABLE | USER;
+        pml4_entry.* = phys.allocateContiguous(1, 1) | PRESENT | WRITABLE | USER;
         x64.invlpg(@intFromPtr(pdpt_entry));
         clearPageTable(pdpt_entry);
     }
     if (pdpt_entry.* == 0) {
-        pdpt_entry.* = phys.allocate() | PRESENT | WRITABLE | USER;
+        pdpt_entry.* = phys.allocateContiguous(1, 1) | PRESENT | WRITABLE | USER;
         x64.invlpg(@intFromPtr(pd_entry));
         clearPageTable(pd_entry);
         updateActiveEntries(pml4_entry, 1);
     }
     if (pd_entry.* == 0) {
-        pd_entry.* = phys.allocate() | PRESENT | WRITABLE | USER;
+        pd_entry.* = phys.allocateContiguous(1, 1) | PRESENT | WRITABLE | USER;
         x64.invlpg(@intFromPtr(pt_entry));
         clearPageTable(pt_entry);
         updateActiveEntries(pdpt_entry, 1);
@@ -143,7 +143,66 @@ pub fn mapPage(virtual_address: usize, physical_address: usize, flags: Flags) vo
 ///   flags:           Mapping flags, excluding `PRESENT`.
 pub fn mapAllocatePage(virtual_address: usize, flags: Flags) void {
     // Allocate a physical page to be mapped, and keep track of the allocation.
-    mapPage(virtual_address, phys.allocate(), flags | ALLOCATED);
+    // serial.print("[VIRT] Mapping 4KB Page at 0x{x}\n", .{virtual_address});
+    mapPage(virtual_address, phys.allocateContiguous(1, 1), flags | ALLOCATED);
+}
+
+/// Maps a 2MB Huge Page.
+pub fn mapPage2MB(virtual_address: usize, physical_address: usize, flags: Flags) void {
+    assert(virtual_address % (2 * 1024 * 1024) == 0);
+    assert(physical_address % (2 * 1024 * 1024) == 0);
+    assert(isAddressSpaceValid());
+
+    const pml4_entry = pml4Entry(virtual_address);
+    const pdpt_entry = pdptEntry(virtual_address);
+    const pd_entry = pdEntry(virtual_address);
+
+    // Prepare higher level paging structures if necessary.
+    if (pml4_entry.* == 0) {
+        pml4_entry.* = phys.allocateContiguous(1, 1) | PRESENT | WRITABLE | USER; // allocate 1 page for PDPT
+        x64.invlpg(@intFromPtr(pdpt_entry));
+        clearPageTable(pdpt_entry);
+    }
+    if (pdpt_entry.* == 0) {
+        pdpt_entry.* = phys.allocateContiguous(1, 1) | PRESENT | WRITABLE | USER; // allocate 1 page for PD
+        x64.invlpg(@intFromPtr(pd_entry));
+        clearPageTable(pd_entry);
+        updateActiveEntries(pml4_entry, 1);
+    }
+
+    assert(pd_entry.* == 0); // Should be free
+    // Bit 7 is HUGE
+    pd_entry.* = physical_address | flags | PRESENT | HUGE;
+    x64.invlpg(virtual_address);
+
+    updateActiveEntries(pdpt_entry, 1);
+}
+
+/// Maps a range of virtual memory to contiguous physical memory.
+/// Tries to use Huge Pages (2MB) where possible.
+pub fn mapRange(virtual_address: usize, physical_address: usize, size: usize, flags: Flags) void {
+    var v_addr = virtual_address;
+    var p_addr = physical_address;
+    var remaining = size;
+
+    while (remaining > 0) {
+        // Check for 2MB alignment and size
+        if (remaining >= 2 * 1024 * 1024 and
+            v_addr % (2 * 1024 * 1024) == 0 and
+            p_addr % (2 * 1024 * 1024) == 0)
+        {
+            mapPage2MB(v_addr, p_addr, flags);
+            v_addr += 2 * 1024 * 1024;
+            p_addr += 2 * 1024 * 1024;
+            remaining -= 2 * 1024 * 1024;
+        } else {
+            // Fallback to 4KB
+            mapPage(v_addr, p_addr, flags);
+            v_addr += PAGE_SIZE;
+            p_addr += PAGE_SIZE;
+            remaining -= PAGE_SIZE;
+        }
+    }
 }
 
 /// Remaps an already mapped virtual page with different flags.
@@ -158,13 +217,50 @@ pub fn remapPage(virtual_address: usize, flags: Flags) void {
     assert(pt_entry.* != 0);
 
     // Preserve the `ALLOCATED` flag.
-    flags |= pt_entry.* & ALLOCATED;
+    var new_flags = flags;
+    new_flags |= @as(Flags, @truncate(pt_entry.* & ALLOCATED));
     // Preserve the address of the physical page.
     const physical_address = pageAlignDown(pt_entry.*);
 
     // Update the entry.
-    pt_entry.* = physical_address | flags | PRESENT;
+    pt_entry.* = physical_address | new_flags | PRESENT;
     x64.invlpg(virtual_address);
+}
+
+/// Page entry flag for huge pages (2MB or 1GB).
+const HUGE: Flags = 1 << 7;
+
+/// Translates a virtual address to a physical address.
+///
+/// Parameters:
+///   address: Virtual address.
+///
+/// Returns:
+///   Physical address, or null if not mapped.
+pub fn virtToPhys(address: usize) ?usize {
+    const pml4_entry = pml4Entry(address);
+    if (pml4_entry.* & PRESENT == 0) return null;
+
+    const pdpt_entry = pdptEntry(address);
+    if (pdpt_entry.* & PRESENT == 0) return null;
+
+    // 1GB Huge Page
+    if (pdpt_entry.* & HUGE != 0) {
+        return (pdpt_entry.* & 0x000FFFFFC0000000) + (address & 0x3FFFFFFF);
+    }
+
+    const pd_entry = pdEntry(address);
+    if (pd_entry.* & PRESENT == 0) return null;
+
+    // 2MB Huge Page
+    if (pd_entry.* & HUGE != 0) {
+        return (pd_entry.* & 0x000FFFFFFFE00000) + (address & 0x1FFFFF);
+    }
+
+    const pt_entry = ptEntry(address);
+    if (pt_entry.* & PRESENT == 0) return null;
+
+    return phys.pageAlignDown(pt_entry.*) + (address & (PAGE_SIZE - 1));
 }
 
 /// Unmaps a virtual page. If the associated physical page was automatically

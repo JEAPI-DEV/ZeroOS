@@ -60,20 +60,17 @@ pub const Process = struct {
 
         const thread = try allocator.create(Thread);
 
-        // Allocate stack from physical memory directly to avoid heap issues.
-        // We assume stack_size is a multiple of PAGE_SIZE.
-        const num_pages = (stack_size + phys.PAGE_SIZE - 1) / phys.PAGE_SIZE;
-        const stack_base = virt.higherHalf(512 * phys.GIGABYTE + 0x1000000 + self.thread_count * 0x100000); // Arbitrary high address
+        // Allocate stack using the standard allocator (from the Heap).
+        // This avoids manual page mapping and uses the pre-allocated contiguous heap memory.
+        const stack_slice = try allocator.alloc(u8, stack_size);
 
-        var i: usize = 0;
-        while (i < num_pages) : (i += 1) {
-            virt.mapAllocatePage(stack_base + i * phys.PAGE_SIZE, virt.WRITABLE);
-        }
+        // Stack grows down, so stack pointer is at the end of the slice.
+        const stack_top = @intFromPtr(stack_slice.ptr) + stack_slice.len;
 
         thread.* = .{
             .id = self.thread_count,
             .state = .READY,
-            .stack_pointer = stack_base + num_pages * phys.PAGE_SIZE,
+            .stack_pointer = stack_top,
             .process = self,
         };
 

@@ -13,6 +13,9 @@ pub const reboot_app = ShellApp{
 fn run(ctx: *ShellContext, args: [][]const u8) anyerror!void {
     _ = ctx;
     _ = args;
+    term.print("Syncing...\n", .{});
+    term.print("Syncing... (DISABLED)\n", .{});
+    // @import("../../fs/ramfs.zig").saveToDisk() catch {};
     term.print("Rebooting...\n", .{});
     x64.outb(0x64, 0xFE);
     x64.hang();

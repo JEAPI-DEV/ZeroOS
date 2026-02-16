@@ -3,6 +3,9 @@
 const std = @import("std");
 const fb = @import("../term/framebuffer.zig");
 const font = @import("../term/font.zig");
+const phys = @import("../memory/phys.zig");
+const virt = @import("../memory/virt.zig");
+const serial = @import("../driver/serial.zig");
 
 pub const Color = fb.RgbColor;
 
@@ -99,14 +102,29 @@ pub var screen_canvas: Canvas = undefined;
 var back_buffer: []Color = undefined;
 
 pub fn initialize(allocator: std.mem.Allocator) !void {
+    _ = allocator; // unused now?
     fb.initialize();
-    const serial = @import("../driver/serial.zig");
     serial.print("[GFX] Framebuffer: {}x{} @ 32bpp\n", .{ fb.width, fb.height });
 
-    const size = fb.width * fb.height;
-    serial.print("[GFX] Allocating back buffer ({} bytes)...\n", .{size * @sizeOf(Color)});
-    back_buffer = try allocator.alignedAlloc(Color, .@"8", size);
-    serial.print("[GFX] Allocation successful\n", .{});
+    const pixel_count = fb.width * fb.height;
+    const size_bytes = pixel_count * @sizeOf(Color);
+
+    // Allocate contiguous pages for the backbuffer (try 2MB alignment for Huge Pages)
+    const pages = std.mem.alignForward(usize, size_bytes, phys.PAGE_SIZE) / phys.PAGE_SIZE;
+    serial.print("[GFX] Allocating dedicated back buffer ({} bytes, {} pages)...\n", .{ size_bytes, pages });
+
+    const phys_addr = phys.allocateContiguous(pages, 512);
+
+    // Map to a dedicated virtual address (e.g., 1TB mark)
+    // 1TB = 1024 * 1024 * 1024 * 1024
+    const virt_addr = virt.higherHalf(1024 * phys.GIGABYTE);
+
+    virt.mapRange(virt_addr, phys_addr, size_bytes, virt.WRITABLE);
+
+    back_buffer.ptr = @ptrFromInt(virt_addr);
+    back_buffer.len = pixel_count;
+
+    serial.print("[GFX] Allocation successful. Virt: 0x{x}, Phys: 0x{x}\n", .{ virt_addr, phys_addr });
 
     screen_canvas = .{
         .width = fb.width,

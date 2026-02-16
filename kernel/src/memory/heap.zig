@@ -4,8 +4,10 @@ const serial = @import("../driver/serial.zig");
 const x64 = @import("../cpu/x64.zig");
 
 const assert = @import("std").debug.assert;
-const GIGABYTE = @import("./phys.zig").GIGABYTE;
-const higherHalf = @import("./virt.zig").higherHalf;
+const phys = @import("./phys.zig");
+const GIGABYTE = phys.GIGABYTE;
+const virt = @import("./virt.zig");
+const higherHalf = virt.higherHalf;
 
 pub const allocator: std.mem.Allocator = .{
     .ptr = undefined,
@@ -31,6 +33,15 @@ var free_list: ?*Block = undefined;
 ///   capacity: Maximum size of the heap, in bytes.
 pub fn initialize(capacity: usize) void {
     term.step("Initializing kernel heap allocator", .{});
+
+    // 1. Allocate contiguous physical memory for the entire heap.
+    // Try to align to 2MB (512 pages) if possible.
+    const pages = capacity / 4096; // using literal 4096 to avoid import cycle if phys not fully available? No, phys is imported.
+    const phys_addr = phys.allocateContiguous(pages, 512);
+
+    // 2. Map the range to the fixed HEAP_ADDRESS
+    // This will automatically use Huge Pages if aligned.
+    virt.mapRange(HEAP_ADDRESS, phys_addr, capacity, virt.WRITABLE);
 
     // Initialize the heap with one big free block.
     heap = @as([*]u8, @ptrFromInt(HEAP_ADDRESS))[0..capacity];

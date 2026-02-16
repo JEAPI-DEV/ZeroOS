@@ -26,12 +26,12 @@ fn run(ctx: *ShellContext, args: [][]const u8) anyerror!void {
         return;
     }
 
-    // Read source
-    var buf: [16384]u8 = undefined;
-    const len = try vfs.VfsNode.read(src_node, 0, &buf);
+    // Copy loop
+    var buf: [4096]u8 = undefined;
+    var offset: u64 = 0;
 
-    // Find/Create destination
-    const dest_node = vfs.lookup(dest_path, ctx.current_dir) catch |err| {
+    // Create destination if needed
+    const dest_node_opt = vfs.lookup(dest_path, ctx.current_dir) catch |err| block: {
         if (err == error.NotFound) {
             const last_slash = std.mem.lastIndexOfScalar(u8, dest_path, '/');
             const parent_node = if (last_slash) |idx|
@@ -42,15 +42,30 @@ fn run(ctx: *ShellContext, args: [][]const u8) anyerror!void {
             const name = if (last_slash) |idx| dest_path[idx + 1 ..] else dest_path;
             const new_node = try vfs.VfsNode.create(parent_node, name);
             new_node.parent = parent_node;
-            _ = try vfs.VfsNode.write(new_node, 0, buf[0..len]);
-            return;
+            break :block new_node;
         }
         return err;
     };
 
+    const dest_node = dest_node_opt; // It might be valid node from lookup or new node
+
+    // If we just looked it up, we need to check if it's a directory?
+    // cp <file> <dir> -> cp <file> <dir>/<filename>
+    // My previous implementation didn't handle that fully (implied exact path).
+    // Let's stick to exact path for now or basic file check.
+
     if (dest_node.node_type != .file) {
+        // If directory, try to append filename?
+        // For now, error.
         term.print("cp: {s}: Not a file\n", .{dest_path});
         return;
     }
-    _ = try vfs.VfsNode.write(dest_node, 0, buf[0..len]);
+
+    // Now loop copy
+    while (true) {
+        const len = try vfs.VfsNode.read(src_node, offset, &buf);
+        if (len == 0) break;
+        _ = try vfs.VfsNode.write(dest_node, offset, buf[0..len]);
+        offset += len;
+    }
 }

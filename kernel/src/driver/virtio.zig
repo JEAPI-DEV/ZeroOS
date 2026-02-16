@@ -72,9 +72,12 @@ pub const DeviceId = enum(u16) {
 pub fn init(bus: u8, slot: u8, func: u8, device_id: u16) void {
     serial.print("[VirtIO] Found device 0x{x} at {}:{}:{}\n", .{ device_id, bus, slot, func });
 
-    // Iterate capabilities to find Common Config
+    // Iterate capabilities to find Common Config and Notify Config
     var cap_offset: u8 = 0;
     var common_cfg_addr: ?usize = null;
+
+    var notify_base: usize = 0;
+    var notify_multiplier: u32 = 0;
 
     // Check Status Register for Capabilities List bit
     const status_reg = pci.pciConfigReadUint16(bus, slot, func, 0x06);
@@ -101,7 +104,20 @@ pub fn init(bus: u8, slot: u8, func: u8, device_id: u16) void {
                 virt.mapPage(virt_addr, phys_addr, virt.WRITABLE | virt.PWT | virt.PCD);
 
                 common_cfg_addr = virt_addr;
-                break;
+            } else if (cfg_type == VIRTIO_PCI_CAP_NOTIFY_CFG) {
+                const bar_val = pci.getBar(bus, slot, func, bar_idx);
+                const bar_addr = bar_val & 0xFFFFFFF0; // Mask flags
+                const phys_addr = bar_addr + off_l;
+
+                // Map it properly (page aligned)
+                const page_phys = @as(usize, phys_addr) & 0xFFFFFFFFFFFFF000;
+                const page_virt = virt.higherHalf(page_phys);
+                virt.mapPage(page_virt, page_phys, virt.WRITABLE | virt.PWT | virt.PCD);
+
+                notify_base = virt.higherHalf(phys_addr); // Keep exact base for calculations
+
+                // Read multiplier (offset 16) - It is 32-bit
+                notify_multiplier = pci.pciConfigReadWord(bus, slot, func, offset + 16);
             }
         } else {
             break;
@@ -109,9 +125,27 @@ pub fn init(bus: u8, slot: u8, func: u8, device_id: u16) void {
     }
 
     if (common_cfg_addr) |addr| {
-        const id = @as(DeviceId, @enumFromInt(device_id));
+        // Determine VirtIO Device ID
+        var virtio_id: u16 = 0;
+        if (device_id >= 0x1040 and device_id <= 0x107F) {
+            // Modern Device
+            virtio_id = device_id - 0x1040;
+        } else if (device_id >= 0x1000 and device_id <= 0x103F) {
+            // Legacy / Transitional Device
+            // Read Subsystem Device ID (Offset 0x2E)
+            virtio_id = pci.pciConfigReadUint16(bus, slot, func, 0x2E);
+        } else {
+            virtio_id = device_id; // Unknown?
+        }
+
+        const id = @as(DeviceId, @enumFromInt(virtio_id));
         if (id == .GPU or id == .LegacyGPU) {
             initGpu(addr);
+        } else if (id == .Block) {
+            // @import("virtio_blk.zig").init(addr, notify_base, notify_multiplier);
+            serial.print("[VirtIO] Block device found but disabled by user request.\n", .{});
+        } else {
+            serial.print("[VirtIO] Skipping device ID {d} (0x{x})\n", .{ virtio_id, virtio_id });
         }
     } else {
         serial.print("[VirtIO] Could not find Common Configuration structure.\n", .{});
